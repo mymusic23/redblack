@@ -162,6 +162,7 @@ pub struct NodeConfig {
 
 impl NodeConfig {
 
+
     // pub fn cli_get_words_pass(&self) -> WordsPass {
     //     self.config_data.cli.as_ref().and_then(|c| c.
     // }
@@ -180,10 +181,6 @@ impl NodeConfig {
                 .map(|r| r.url.clone()).collect::<Vec<String>>()
             ).unwrap_or_default()
     }
-
-}
-
-impl NodeConfig {
 
     pub fn set_words(&mut self, words: String) {
         let mut data = (*self.config_data).clone();

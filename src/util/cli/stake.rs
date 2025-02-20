@@ -5,6 +5,7 @@ use redgold_keys::word_pass_support::WordsPassNodeConfig;
 use redgold_schema::conf::node_config::NodeConfig;
 use redgold_schema::conf::rg_args::Stake;
 use redgold_schema::errors::into_error::ToErrorInfo;
+use redgold_schema::keys::words_pass::WordsPass;
 use redgold_schema::RgResult;
 use redgold_schema::structs::{CurrencyAmount, SupportedCurrency};
 use redgold_keys::util::mnemonic_support::MnemonicSupport;
@@ -28,9 +29,9 @@ pub async fn cli_stake(s: Stake, nc: &Box<NodeConfig>) -> RgResult<()> {
     if !input_currency.valid_stake_input() {
         return "Invalid input currency".to_error();
     }
+    
 
-
-    let words = nc.secure_words_or();
+    let mut words = nc.secure_words_or();
     let hot_kp = words.default_kp().unwrap();
     let hot_pk = hot_kp.public_key();
     let hot_addr = hot_pk.address().unwrap();
@@ -54,7 +55,7 @@ pub async fn cli_stake(s: Stake, nc: &Box<NodeConfig>) -> RgResult<()> {
 
     let pev = pid.party_events.clone().ok_msg("No party events found")?;
     let party_address = pid.metadata.address(&SupportedCurrency::Redgold).unwrap();
-    
+
     if input_currency == SupportedCurrency::Redgold {
 
         let frac_amt = if s.not_usd {
@@ -86,6 +87,7 @@ pub async fn cli_stake(s: Stake, nc: &Box<NodeConfig>) -> RgResult<()> {
 
         let price = res.query_price(util::current_time_millis_i64(), input_currency).await.unwrap();
 
+        let all_word_addrs = words.to_all_addresses_default(&nc.network).unwrap();
         // account for not usd
         let amt = if s.not_usd {
             CurrencyAmount::from_fractional_cur(s.amount, input_currency).unwrap()
@@ -98,12 +100,14 @@ pub async fn cli_stake(s: Stake, nc: &Box<NodeConfig>) -> RgResult<()> {
         let ai = c.address_info_for_pk(&hot_pk).await.unwrap();
         tb.with_address_info(ai)?;
 
+        let ext_addr = all_word_addrs.iter().find(|x| x.currency_or() == input_currency).unwrap();
+
         // Create external stake request
         tb.with_external_stake_usd_bounds(
             None,
             None,
             &hot_addr,  // stake control address
-            &hot_addr,  // external address (same as hot_addr since we're using the same keypair)
+            &ext_addr,
             &amt,    // external amount
             &party_address, // party address
             &CurrencyAmount::std_pool_fee(), // party fee
@@ -114,7 +118,9 @@ pub async fn cli_stake(s: Stake, nc: &Box<NodeConfig>) -> RgResult<()> {
         let result = c.send_transaction(&signed, true).await?;
         info!("External stake transaction submitted: {}", result.json_or());
 
-        let res = res.send(&party_address, &amt, true, Some(hot_pk), Some(hot_kp.to_private_hex())).await.unwrap();
+        let party_address_cur = pid.metadata.address(&input_currency).unwrap();
+
+        let res = res.send(&party_address_cur, &amt, true, Some(hot_pk), Some(hot_kp.to_private_hex())).await.unwrap();
         
         info!("External network transaction broadcasted: {}", res.1.json_or());
     }

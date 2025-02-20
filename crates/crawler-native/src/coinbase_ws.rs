@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 
 use futures_util::{FutureExt, SinkExt, Stream, StreamExt, TryStreamExt};
-use metrics::counter;
+use metrics::{counter, gauge};
 use redgold_schema::errors::helpers::WithMetrics;
 use redgold_schema::errors::into_error::ToErrorInfo;
 use redgold_crawler::coinbase::message_access::{MessageAccess};
@@ -32,6 +32,7 @@ async fn run_websocket_stream_inf(
         .with_err_count(format!("redgold_ws_stream_err_{suffix}"))
         .log_error()
         .ok();
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     }
 }
 async fn run_websocket_stream(url: String, initial_subscribe_message: String, messages: flume::Sender<String>, ws_identifier: impl Into<String>) -> RgResult<()> {
@@ -138,14 +139,19 @@ pub async fn run_decoded_coinbase_ws(ticker: WriteOneReadAll<CoinbaseWsTicker>) 
             .with_err_count("coinbase_ws_ticker_decode_err") {
                 match msg {
                     redgold_crawler::coinbase::ticker_schema::Message::Ticker(ticker_message) => {
-                        let p = ticker_message.price.parse::<f64>().unwrap();
-                        let pid = ticker_message.product_id.replace("-USD", "");
-                        if let Ok(currency) = SupportedCurrency::try_from(pid) {
-                            let mut data = t2.clone_read();
-                            data.push_message(ticker_message.clone());
-                            data.latest_by.insert(currency, ticker_message.clone());
-                            data.latest_price.insert(currency, p);
-                            t2.write(data);
+                        if let Ok(p) = ticker_message.price.parse::<f64>()
+                            .error_info("Ticker price parse failure")
+                            .with_err_count("coinbase_ws_ticker_price_parse_err") {
+                            let pid = ticker_message.product_id.replace("-USD", "");
+                            if let Ok(currency) = SupportedCurrency::try_from(pid) {
+                                let currency_abbr = currency.abbreviated();
+                                let mut data = t2.clone_read();
+                                data.push_message(ticker_message.clone());
+                                data.latest_by.insert(currency, ticker_message.clone());
+                                gauge!(format!("coinbase_ws_ticker_price_{currency_abbr}")).set(p);
+                                data.latest_price.insert(currency, p);
+                                t2.write(data);
+                            }
                         }
                     }
                     _ => {

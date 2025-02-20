@@ -22,7 +22,7 @@ use redgold_schema::helpers::easy_json::EasyJsonDeser;
 use redgold_schema::keys::words_pass::WordsPass;
 use redgold_schema::observability::errors::EnhanceErrorInfo;
 use redgold_schema::proto_serde::ProtoSerde;
-use redgold_schema::structs::{ErrorInfo, NetworkEnvironment, Proof, PublicKey};
+use redgold_schema::structs::{CurrencyAmount, ErrorInfo, NetworkEnvironment, Proof, PublicKey};
 // use crate::util::cli::commands::send;
 use redgold_schema::{error_info, structs, ErrorInfoContext, RgResult, SafeOption};
 use hex;
@@ -136,6 +136,19 @@ impl SingleKeyBitcoinWallet<MemoryDatabase> {
         }
         Ok(bitcoin_wallet)
     }
+}
+
+
+pub fn get_balance_electrum(network: &NetworkEnvironment, address: &structs::Address) -> RgResult<CurrencyAmount> {
+    let addr = address.render_string()?;
+    let btc_addr = Address::from_str(&*addr).error_info("Unable to parse address")?;
+    let backend = network_to_backends(network).get(0).unwrap().clone();
+    let client = Client::new(&*backend)
+        .error_info("Error building bdk client")?;
+    let client = ElectrumBlockchain::from(client);
+    // Get the script_pubkey directly from the address
+    let bal = client.script_get_balance(&btc_addr.script_pubkey()).error_info("Error getting balance")?;
+    Ok(CurrencyAmount::from_btc(bal.confirmed as i64))
 }
 
 pub fn get_all_tx_electrum(network: &NetworkEnvironment, address: &structs::Address) -> RgResult<Vec<ExternalTimedTransaction>> {

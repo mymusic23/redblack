@@ -8,7 +8,7 @@ fn main() {
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;
-
+    use redgold_gui::wasm_app::TemplateApp;
     // Redirect `log` message to `console.log` and friends:
     eframe::WebLogger::init(log::LevelFilter::Debug).ok();
 
@@ -30,7 +30,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(wasm_app::TemplateApp::new(cc)))),
+                Box::new(|cc| Ok(Box::new(TemplateApp::new(cc)))),
             )
             .await;
 

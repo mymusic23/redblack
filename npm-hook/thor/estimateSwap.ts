@@ -1,5 +1,5 @@
-import { Network } from '@xchainjs/xchain-client'
-import { Midgard, MidgardCache, MidgardQuery } from '@xchainjs/xchain-midgard-query'
+import {Network} from '@xchainjs/xchain-client'
+import {Midgard, MidgardCache, MidgardQuery} from '@xchainjs/xchain-midgard-query'
 import {
   QuoteSwapParams,
   SwapEstimate,
@@ -8,30 +8,10 @@ import {
   Thornode,
   TxDetails,
 } from '@xchainjs/xchain-thorchain-query'
-import { CryptoAmount, assetAmount, assetFromString, assetToBase, register9Rheader } from '@xchainjs/xchain-util'
+import {assetAmount, assetFromString, assetToBase, CryptoAmount, register9Rheader} from '@xchainjs/xchain-util'
 import axios from 'axios'
-import axiosRetry from 'axios-retry'
 
 register9Rheader(axios)
-
-// Configure axios retry
-axiosRetry(axios, { 
-  retries: 3,
-  retryDelay: axiosRetry.exponentialDelay,
-  retryCondition: (error) => {
-    return axiosRetry.isNetworkOrIdempotentRequestError(error) || error.message.includes('THORNode not responding');
-  }
-});
-
-const THORNODE_URL = {
-  mainnet: 'https://thornode.ninerealms.com',
-  testnet: 'https://testnet.thornode.thorchain.info'
-}
-
-const MIDGARD_URL = {
-  mainnet: 'https://midgard.ninerealms.com',
-  testnet: 'https://testnet.midgard.thorchain.info'
-}
 
 // Helper function for printing out the returned object
 function print(estimate: SwapEstimate, input: CryptoAmount) {
@@ -68,34 +48,28 @@ const estimateSwap = async () => {
   try {
     const toleranceBps = 300 //hardcode slip for now
     const network = process.argv[2] as Network
-    
-    if (!['mainnet', 'testnet'].includes(network)) {
-      throw new Error('Network must be either mainnet or testnet');
-    }
-
     const amount = process.argv[3]
     const decimals = Number(process.argv[4])
 
-    if (isNaN(decimals)) {
-      throw new Error('Decimals must be a number');
-    }
-
     const fromAsset = assetFromString(`${process.argv[5]}`)
     const toAsset = assetFromString(`${process.argv[6]}`)
-    
-    if (!fromAsset || !toAsset) {
-      throw new Error('Invalid asset format. Use format like BTC.BTC or ETH.ETH');
+    const toDestinationAddress = `${process.argv[7]}`
+
+    let THORNODE_API_URL = 'https://testnet.thornode.ninerealms.com'
+
+    if (network == Network.Mainnet) {
+      THORNODE_API_URL = 'https://thornode.ninerealms.com';
     }
 
-    const toDestinationAddress = `${process.argv[7]}`
-    
-    console.log('Connecting to THORNode...');
-    console.log(`Using THORNode endpoint: ${THORNODE_URL[network]}`);
-    console.log(`Using Midgard endpoint: ${MIDGARD_URL[network]}`);
+    // const MIDGARD_API_URL = 'https://midgard.ninerealms.com'
 
-    const midgard = new Midgard(network, MIDGARD_URL[network])
-    const midgardCache = new MidgardCache(midgard)
-    const thornode = new Thornode(network, THORNODE_URL[network])
+// When creating Thornode instance:
+    const thornode = new Thornode(network, {
+      apiRetries: 5,
+      thornodeBaseUrls: [THORNODE_API_URL]
+    })
+
+    const midgardCache = new MidgardCache(new Midgard(network))
     const thorchainCache = new ThorchainCache(thornode, new MidgardQuery(midgardCache))
     const thorchainQuery = new ThorchainQuery(thorchainCache)
     let swapParams: QuoteSwapParams
@@ -131,5 +105,5 @@ const main = async () => {
 }
 
 main()
-  .then(() => process.exit(0))
-  .catch((err) => console.error(err))
+    .then(() => process.exit(0))
+    .catch((err) => console.error(err))

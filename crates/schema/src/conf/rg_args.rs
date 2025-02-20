@@ -75,7 +75,7 @@ pub struct GlobalSettings {
 
     // Most important configs first:
     /// Network environment to connect to, e.g. main or test
-    #[clap(long)]
+    #[clap(short, long)]
     pub network: Option<String>,
     #[clap(long)]
     /// Log level for redgold logs -- for GUI or Node, i.e. DEBUG, INFO, WARN, ERROR, default INFO

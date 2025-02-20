@@ -33,6 +33,10 @@ impl StakeMethods for PartyEvents {
             if let Ok(addr) = oa {
                 let matching = self.pending_external_staking_txs.iter()
                     .filter(|s| {
+                        if s.amount.to_fractional() == amt.to_fractional() {
+                            info!("Comparing amount one {} to amount two {}", s.amount.to_fractional(), amt.to_fractional());
+                            info!("Comparing address one {} to address two {}", s.external_address.render_string().unwrap(), addr.render_string().unwrap());
+                        }
                         let amount_equal = s.amount == amt;
                         let address_equal = s.external_address == addr;
                         amount_equal && address_equal

@@ -80,8 +80,10 @@ pub async fn get_address_pool_info(r: Relay) -> RgResult<Option<AddressPoolInfo>
             let balances = pe.balance_map.iter().map(|(k, v)| {
                 (format!("{:?}", k), v.to_fractional().to_string())
             }).collect::<HashMap<String, String>>();
-            let addresses = pk.to_all_addresses_for_network_by_currency(&r.node_config.network)?
-                .iter().flat_map(|(c,a)| a.render_string().ok()
+            let addresses = d.metadata.all_address()
+                .iter()
+                .map(|a| (a.currency_or(), a))
+                .flat_map(|(c,a)| a.render_string().ok()
                 .map(|aa| (format!("{:?}", c), aa))).collect::<HashMap<String, String>>();
             let central_prices = pe.central_prices.iter().map(|(k,v)| {
                 (format!("{:?}", k), v.clone())
@@ -191,7 +193,17 @@ pub fn convert_events(pid: &PartyInternalData, nc: &NodeConfig) -> RgResult<Vec<
                     } else if i.tx.is_swap() {
                         "Swap"
                     } else if i.tx.is_stake() {
-                        "Stake"
+                        if i.tx.stake_destination().is_some() {
+                            "StakeDepositExternal"
+                        } else if i.tx.stake_deposit_request().is_some() {
+                            "StakeDeposit"
+                        } else if i.tx.stake_withdrawal_destination().is_some() {
+                            "StakeWithdrawalExternal"
+                        } else if i.tx.stake_withdrawal_request().is_some() {
+                            "StakeWithdrawal"
+                        } else {
+                            "StakeUnknown"
+                        }
                     } else {
                         "Unknown"
                     }

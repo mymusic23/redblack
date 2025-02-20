@@ -20,6 +20,11 @@ pub enum AddressEventExtendedType {
 }
 
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct PartyEventResult {
+
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct PartyEvents where {
     pub network: NetworkEnvironment,

@@ -30,7 +30,7 @@ use redgold_schema::helpers::easy_json::EasyJson;
 use redgold_schema::keys::words_pass::WordsPass;
 use redgold_schema::observability::errors::Loggable;
 use redgold_schema::party::party_internal_data::PartyInternalData;
-use redgold_schema::structs::{AddressInfo, CurrencyAmount, ErrorInfo, PublicKey, SupportedCurrency};
+use redgold_schema::structs::{Address, AddressInfo, CurrencyAmount, ErrorInfo, PublicKey, SupportedCurrency};
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
@@ -193,7 +193,8 @@ fn random_bytes() -> [u8; 32] {
 pub fn create_swap_tx<G,E>(
     g: &G,
     e: &E,
-    party_pk: PublicKey,
+    party_addrs: HashMap<SupportedCurrency, Address>,
+    // party_pk: PublicKey,
     input_currency: SupportedCurrency,
     hot_pk: PublicKey,
     hot_kp: KeyPair,
@@ -204,7 +205,7 @@ pub fn create_swap_tx<G,E>(
     output_currency: SupportedCurrency
 ) -> JoinHandle<()> where G : GuiDepends + Clone + Send + 'static + Sync,
                           E: ExternalNetworkResources + Send + Sync + 'static + Clone {
-    let party_addr = party_pk.address().unwrap();
+    let party_redgold_address = party_addrs.get(&SupportedCurrency::Redgold).cloned().unwrap();
     let mut res = e.clone();
 
     let pk = hot_pk;
@@ -234,12 +235,14 @@ pub fn create_swap_tx<G,E>(
             }
         }
         SupportedCurrency::Bitcoin => {
-            party_pk.to_bitcoin_address_typed(&config.network).unwrap().mark_external().clone()
+            // party_pk.to_bitcoin_address_typed(&config.network).unwrap().mark_external().clone()
+            party_addrs.get(&SupportedCurrency::Bitcoin).unwrap().clone()
         }
         SupportedCurrency::Ethereum => {
-            let mut addr = party_pk.to_ethereum_address_typed().unwrap();
-            addr.mark_external();
-            addr.clone()
+            // let mut addr = party_pk.to_ethereum_address_typed().unwrap();
+            // addr.mark_external();
+            // addr.clone()
+            party_addrs.get(&SupportedCurrency::Ethereum).unwrap().clone()
         }
         _ => panic!("Unsupported currency")
     };
@@ -256,7 +259,7 @@ pub fn create_swap_tx<G,E>(
             &to,
             &amount,
             address_info.as_ref(),
-            Some(&party_addr),
+            Some(&party_redgold_address),
             None,
             Some(from_eth_addr),
             &ksi,

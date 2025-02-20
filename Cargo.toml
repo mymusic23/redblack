@@ -47,6 +47,8 @@ members = [
     "crates/ops",
     "crates/daq",
     "crates/safe-bindings",
+    "crates/thorchain",
+    "crates/cli",
 ]
 exclude = ["examples/experiments/rust_wasm", "ai", "ai-py"]
 
@@ -80,6 +82,8 @@ redgold-common-no-wasm = { path = "crates/common-no-wasm" , version = "0.1.44" }
 redgold-fs = { path = "crates/fs" , version = "0.1.44" }
 redgold-ops = { path = "crates/ops" , version = "0.1.44" }
 redgold-safe-bindings = { path = "crates/safe-bindings" , version = "0.1.44" }
+redgold-thorchain = { path = "crates/thorchain" , version = "0.1.44" }
+redgold-cli = { path = "crates/cli" , version = "0.1.44" }
 
 # Serialization
 serde = { version = "1.0.130", features = ["default", "derive"] }
@@ -89,9 +93,10 @@ serde_cbor = "0.11.2"
 serde_arrow = { version = "0.12.3", features = ["arrow-54"] }
 toml = "0.8.12"
 uuid = { version = "1.3.3", features = ["serde", "v4", "v1"] }
-
+chrono = { version = "0.4.19", features = ["serde"] }
 reqwest = { version = "0.11", features = ["json"] }
 
+crossterm = "0.25"
 
 num-bigint = "0.4"
 num-traits = "0.2"
@@ -124,7 +129,11 @@ strum = "0.26.3"
 strum_macros = "0.26.4"
 
 
+
+#############################################
+
 [dependencies]
+redgold-cli = {workspace = true}
 redgold-ci = { workspace = true }
 redgold-daq = { workspace = true }
 strum = {workspace = true}
@@ -140,7 +149,6 @@ redgold-common-no-wasm = {workspace = true}
 redgold-ops = {workspace = true}
 redgold-rpc-integ = {workspace = true}
 
-crossterm = "0.25"
 reqwest = {workspace = true}
 arc-swap = {workspace = true}
 sha3 = {workspace = true}
@@ -160,7 +168,7 @@ toml = {workspace = true}
 
 dashmap = "5.5.0"
 # Deprecate after moving into data module -- only for build
-
+crossterm = {workspace = true}
 crossbeam = "0.8.1"
 # GUI Alone
 # TODO: remove these in favor of the module
@@ -200,7 +208,7 @@ tracing-subscriber = { workspace = true }
 
 # Move to trust module
 ndarray = "0.15.3"
-chrono = "0.4.19"
+chrono = { workspace = true}
 config = { version = "0.14.0", features = ["toml"] }
 
 #priority-queue = "1.2.0"

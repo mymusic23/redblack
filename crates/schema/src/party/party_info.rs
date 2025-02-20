@@ -102,6 +102,12 @@ impl PartyMetadata {
             .collect()
     }
 
+    pub fn address_by_currency_latest(&self) -> HashMap<SupportedCurrency, Address> {
+        self.address_by_currency().into_iter()
+            .map(|(k, v)| (k, v.last().cloned().unwrap()))
+            .collect()
+    }
+
     pub fn earliest_time(&self) -> i64 {
         self.instances.iter().filter_map(|i| i.creation_time).min().unwrap_or(0)
     }
@@ -180,6 +186,10 @@ impl PartyMetadata {
 
     pub fn address(&self, cur: &SupportedCurrency) -> Option<Address> {
         self.address_by_currency().get(cur).and_then(|a| a.last().map(|a| a.clone()))
+    }
+
+    pub fn all_address(&self) -> HashSet<Address> {
+        self.instances.iter().flat_map(|i| i.address.clone()).collect()
     }
 
     pub fn add_instance_equal_members(&mut self, instance: &PartyInstance, equal_members: &Vec<PublicKey>) {

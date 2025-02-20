@@ -117,7 +117,7 @@ pub async fn cli_swap(s: Swap, nc: &Box<NodeConfig>) -> RgResult<()> {
 
     let channel = Channel::new();
 
-    let jh = create_swap_tx(&g, &res, party_key.clone(), input_currency.clone(), hot_pk, hot_kp, amount,
+    let jh = create_swap_tx(&g, &res, pid.metadata.address_by_currency_latest(), input_currency.clone(), hot_pk, hot_kp, amount,
                      &(*nc).clone(), ai, channel.clone(), output_currency.clone());
 
     jh.await.unwrap();

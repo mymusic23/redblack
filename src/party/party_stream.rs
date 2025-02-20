@@ -38,11 +38,17 @@ impl PartyEventBuilder for PartyEvents {
     }
 
     fn handle_external_event(&mut self, e: &AddressEvent, time: i64, ec: &AddressEvent, t: &ExternalTimedTransaction) -> RgResult<()> {
-
+        println!("Handle external");
         if ec.incoming() {
 
             // First check if this matches a pending stake event.
-            if !self.check_external_event_expected(e) {
+            let expected = self.check_external_event_expected(e);
+
+
+            if self.pending_external_staking_txs.len() > 1 {
+                info!("Pending external staking txs: {}", self.pending_external_staking_txs.len());
+            }
+            if !expected {
 
                 // Then assume this is a swap for external pair to RDG.
                 let mut other_addr = t.other_address_typed().expect("addr");
@@ -75,6 +81,7 @@ impl PartyEventBuilder for PartyEvents {
             // if t.currency == SupportedCurrency::Ethereum {
             //     info!("Eth outgoing");
             // }
+
 
             self.unfulfilled_internal_tx_requiring_external_outgoing_mpc_withdrawals.retain(|(of, d)| {
                 let res = Self::retain_unfulfilled_withdrawals(t, d);

@@ -260,11 +260,18 @@ fn proceed_from_pk<G, E>(
                     return;
                 }
                 let data = data.unwrap();
-                let party_pk = data
+                let result = data
                     .first_party
                     .as_ref()
-                    .lock().ok()
-                    .map(|p| p.proposer_key.clone())
+                    .lock()
+                    .ok();
+                // let party_pk = result
+                //     .as_ref()
+                //     .map(|p| p.proposer_key.clone())
+                //     .unwrap();
+                //
+                let party_addrs = result
+                    .map(|p| p.metadata.address_by_currency_latest())
                     .unwrap();
 
                 let map = data.price_map_usd_pair_incl_rdg.clone();
@@ -277,7 +284,7 @@ fn proceed_from_pk<G, E>(
 
                 // let secret = ls.wallet_state.hot_secret_key.clone().unwrap();
                 let channel = ls.local_messages.clone();
-                create_swap_tx(g, &ls.external_network_resources.clone(), party_pk,
+                create_swap_tx(g, &ls.external_network_resources.clone(), party_addrs,
                 input_currency, pk, kp, amount, &ls.node_config.clone(), address_info, channel, output_currency);
             }
         }

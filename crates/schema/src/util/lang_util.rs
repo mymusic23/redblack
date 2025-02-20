@@ -2,6 +2,7 @@ use crate::helpers::easy_json::json_or;
 use crate::structs::ErrorInfo;
 use itertools::Itertools;
 use serde::Serialize;
+use crate::{ErrorInfoContext, RgResult};
 
 pub trait SameResult<T> {
     fn combine(self) -> T;

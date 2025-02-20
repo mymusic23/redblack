@@ -32,7 +32,7 @@ use redgold_keys::util::mnemonic_support::MnemonicSupport;
 use redgold_keys::word_pass_support::{NodeConfigKeyPair, WordsPassNodeConfig};
 use redgold_keys::KeyPair;
 use redgold_schema::conf::node_config::NodeConfig;
-use redgold_schema::conf::rg_args::{AddServer, BalanceCli, DebugCommand, Deploy, FaucetCli, ColdWordMixer, QueryCli, RgDebugCommand, TestTransactionCli, WalletAddress, WalletSend};
+use redgold_schema::conf::rg_args::{AddServer, BalanceCli, ColdWordMixer, DebugCommand, Deploy, FaucetCli, QueryCli, RgDebugCommand, TestTransactionCli, WalletAddress, WalletSend};
 use redgold_schema::helpers::easy_json::EasyJson;
 use redgold_schema::helpers::easy_json::{json, json_from, json_pretty};
 use redgold_schema::helpers::with_metadata_hashable::WithMetadataHashable;
@@ -40,7 +40,7 @@ use redgold_schema::keys::words_pass::WordsPass;
 use redgold_schema::observability::errors::Loggable;
 use redgold_schema::proto_serde::ProtoSerde;
 use redgold_schema::servers::ServerOldFormat;
-use redgold_schema::structs::{Address, CurrencyAmount, ErrorInfo, Hash, NetworkEnvironment, Proof, PublicKey};
+use redgold_schema::structs::{Address, CurrencyAmount, ErrorInfo, Hash, NetworkEnvironment, Proof, PublicKey, SupportedCurrency};
 use redgold_schema::transaction::rounded_balance_i64;
 use redgold_schema::tx::tx_builder::TransactionBuilder;
 use redgold_schema::{error_info, ErrorInfoContext, RgResult, SafeOption};
@@ -198,16 +198,41 @@ pub async fn faucet(p0: &FaucetCli, p1: &NodeConfig) -> Result<(), ErrorInfo>  {
 
 pub async fn balance_lookup(request: &BalanceCli, nc: &Box<NodeConfig>) -> Result<(), ErrorInfo> {
     // TODO: Get keypair from prior cli steps.
-    let w = nc.secure_words_or().keypair_at_change(0).expect("works");
-    let addr = if let Some(a) = request.address.as_ref() {
-        a.parse_address()?
-    } else {
-        w.address_typed()
-    };
+    let words = nc.cli_get_words_pass();
+    let ext = ExternalNetworkResourcesImpl::new(nc, None).unwrap();
+    let kp = words.keypair_at_change(0).expect("works");
+    if let Some(a) = request.address.as_ref() {
+        let a = a.parse_address()?;
+        if a.as_external().currency_or() == SupportedCurrency::Redgold {
+            let b = nc.api_rg_client().balance(&a).await?;
+            let a = CurrencyAmount::from_rdg(b);
+            println!("{} RDG", a.to_fractional().to_string());
+        } else {
+            let a = a.as_external();
+            let b = ext.get_live_balance(&a).await?.to_fractional();
+            println!("{} {}", b, a.currency_or().abbreviated());
+        }
+        return Ok(())
+    }
+
+    let c = nc.api_rg_client().balance_pk(&kp.public_key()).await?;
     // println!("about to query");
-    let response = nc.api_client().query_hash(addr.render_string()?).await?;
-    let rounded = rounded_balance_i64(response.address_info.safe_get_msg("missing address_info")?.balance);
-    println!("{}", rounded.to_string());
+    // let client = nc.api_client();
+    // let response = client.query_hash(addr.render_string()?).await?;
+    // let rounded = rounded_balance_i64(response.address_info.safe_get_msg("missing address_info")?.balance);
+    println!("{} RDG", c.to_fractional().to_string());
+    let addrs = words.to_all_addresses_default(&nc.network).ok();
+    if let Some(a) = addrs {
+        for addr in a {
+            if addr.currency_or() == SupportedCurrency::Redgold {
+                continue;
+            }
+            let b = ext.get_live_balance(&addr).await.log_error().ok()
+                .map(|a| a.to_fractional()).unwrap_or(0.);
+            println!("{} {} {}", addr.render_string()?, b, addr.currency_or().abbreviated());
+        }
+    }
+
     Ok(())
 }
 
@@ -303,41 +328,12 @@ pub async fn deploy(deploy: &Deploy, node_config: &NodeConfig) -> RgResult<JoinH
 }
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
+use redgold_cli::config_ext::{get_input, NodeConfigExt};
+use redgold_common::external_resources::ExternalNetworkResources;
+use redgold_schema::util::lang_util;
+use crate::integrations::external_network_resources::ExternalNetworkResourcesImpl;
 use crate::util::current_time_millis;
 
-pub async fn get_input(prompt: impl Into<String>, is_password: bool) -> RgResult<Option<String>> {
-    println!("{}", prompt.into());
-
-    if !is_password {
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).error_info("Failed to read line")?;
-        return if input.is_empty() { Ok(None) } else { Ok(Some(input)) };
-    }
-
-    // Password input handling
-    enable_raw_mode().error_info("Failed to enable raw mode")?;
-    let mut password = String::new();
-
-    loop {
-        match read().error_info("Failed to read event")? {
-            Event::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Enter => break,
-                KeyCode::Backspace => { password.pop(); },
-                KeyCode::Char(c) => {
-                    password.push(c);
-                    print!("*");
-                },
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-
-    disable_raw_mode().error_info("Failed to disable raw mode")?;
-    println!(); // New line after password entry
-
-    Ok(Some(password))
-}
 //
 // pub async fn get_input_rpass(prompt: impl Into<String>, is_password: bool) -> RgResult<Option<String>> {
 //     let prompt = prompt.into();
@@ -608,7 +604,7 @@ pub async fn debug_commands(p0: &DebugCommand, nc: &Box<NodeConfig>) -> RgResult
             RgDebugCommand::ServerInfo(_) => {
                 let passphrase = if nc.config_data.cli.as_ref()
                     .and_then(|c| c.passphrase.as_ref()).cloned().unwrap_or(false) {
-                    let res = get_input("Enter passphrase:", true).await?;
+                    let res = get_input("Enter passphrase:", true)?;
                     Some(res.unwrap())
                 } else {
                     None
@@ -719,7 +715,7 @@ async fn copy_usb_info(p1: &Box<NodeConfig>) -> RgResult<()> {
 
 pub async fn cold_mix(c: ColdWordMixer, nc: &NodeConfig) -> RgResult<()> {
     let words = nc.secure_mnemonic_words().unwrap();
-    let pass = get_input("Enter mixing password:", true).await.unwrap().unwrap();
+    let pass = get_input("Enter mixing password:", true).unwrap().unwrap();
     // let phrase = get_input("Enter wallet passphrase:", true).await?;
     let start = current_time_millis();
 

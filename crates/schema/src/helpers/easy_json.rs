@@ -22,6 +22,12 @@ impl EasyJsonDeser for String {
     }
 }
 
+impl EasyJsonDeser for &str {
+    fn json_from<'a, T: serde::Deserialize<'a>>(&'a self) -> anyhow::Result<T, ErrorInfo> {
+        json_from(self)
+    }
+}
+
 // #[async_trait]
 impl<T> EasyJson for T
 where T: Serialize {

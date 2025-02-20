@@ -4,7 +4,6 @@ use redgold_schema::structs::{AboutNodeRequest, AboutNodeResponse, Address, Addr
 use std::time::Duration;
 use redgold_schema::explorer::DetailedAddress;
 use std::collections::HashMap;
-use reqwest::ClientBuilder;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tracing::debug;
@@ -15,6 +14,11 @@ use redgold_schema::observability::errors::{EnhanceErrorInfo, Loggable};
 use redgold_schema::party::party_internal_data::PartyInternalData;
 use redgold_schema::proto_serde::ProtoSerde;
 use redgold_schema::util::lang_util::WithMaxLengthString;
+use redgold_schema::errors::into_error::ToErrorInfo;
+
+
+#[cfg(not(target_arch = "wasm32"))]
+use reqwest::ClientBuilder;
 
 
 pub trait RequestResponseAuth: Send + Sync  {
@@ -132,6 +136,10 @@ impl RgHttpClient {
         format!("http://{}:{}/metrics", self.url, self.port - 2)
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub async fn metrics(&self) -> RgResult<Vec<(String, String)>>  {
+        "error".to_error()
+    }
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn metrics(&self) -> RgResult<Vec<(String, String)>>  {
         let client = ClientBuilder::new().timeout(self.timeout).build().unwrap();
@@ -186,6 +194,15 @@ impl RgHttpClient {
             builder = builder.proxy(reqwest::Proxy::http(h).error_info("Failed to build proxy")?);
         }
         builder.build().error_info("Failed to build client")
+    }
+
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn json_get<Resp: DeserializeOwned>(
+        &self,
+        endpoint: impl Into<String>,
+    ) -> RgResult<Resp> {
+        "error".to_error()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -317,14 +334,17 @@ impl RgHttpClient {
         Ok(response.get_public_key_balance_response.ok_or(error_info("Missing get_public_key_balance_response response"))?)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn party_data(&self) -> RgResult<HashMap<PublicKey, PartyInternalData>> {
         let pid = self.json_get::<Vec<PartyInternalData>>("v1/party/data").await?;
         let mut hm = HashMap::new();
         for pd in pid {
             hm.insert(pd.proposer_key.clone(), pd);
         }
+    
         Ok(hm)
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn enriched_party_data(&self) -> HashMap<PublicKey, PartyInternalData> {
         self.party_data().await.log_error().map(|mut r| {
             r.iter_mut().for_each(|(_, v)| {

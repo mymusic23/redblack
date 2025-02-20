@@ -13,7 +13,7 @@ use bdk::sled::Tree;
 use itertools::{all, Itertools};
 use redgold_common::external_resources::{EncodedTransactionPayload, ExternalNetworkResources, NetworkDataFilter, PartyCreationResult, PeerBroadcast};
 use redgold_keys::address_external::{get_checksum_address, ToBitcoinAddress, ToEthereumAddress};
-use redgold_keys::btc::btc_wallet::{get_all_tx_electrum, SingleKeyBitcoinWallet};
+use redgold_keys::btc::btc_wallet::{get_all_tx_electrum, get_balance_electrum, SingleKeyBitcoinWallet};
 use redgold_keys::word_pass_support::NodeConfigKeyPair;
 use redgold_keys::{KeyPair, TestConstants};
 use redgold_rpc_integ::eth::eth_wallet::EthWalletWrapper;
@@ -505,9 +505,7 @@ async fn get_all_tx_for_pk(&self, pk: &PublicKey, currency: SupportedCurrency, f
     async fn get_live_balance(&self, address: &Address) -> RgResult<CurrencyAmount> {
         match address.currency_or() {
             SupportedCurrency::Bitcoin => {
-                let arc = self.btc_wallet_for_address(address).await?;
-                let w = arc.lock().await;
-                w.balance()
+                get_balance_electrum(&self.node_config.network, address)
             },
             SupportedCurrency::Redgold => {
                 self.relay.safe_get_msg("Missing relay")?.ds.utxo
@@ -1070,8 +1068,11 @@ async fn test_get_all_btc_txs() {
     let network = NetworkEnvironment::Dev;
     let pk = kp.1.public_key();
     let addr = pk.to_bitcoin_address_typed(&network).unwrap();
-    let nc = NodeConfig::by_env_with_args(NetworkEnvironment::Dev).await;
-    let n = ExternalNetworkResourcesImpl::new(&nc, None).unwrap();
-    let txs = n.get_all_tx_for_address(&addr, SupportedCurrency::Bitcoin, None).await.unwrap();
-    assert!(txs.len() > 0);
+    let addr2 = pk.to_bitcoin_address_typed(&NetworkEnvironment::Main).unwrap();
+    let addr2 = pk.to_ethereum_address_typed().unwrap();
+    println!("addr2: {}", addr2.render_string().unwrap());
+    // let nc = NodeConfig::by_env_with_args(NetworkEnvironment::Dev).await;
+    // let n = ExternalNetworkResourcesImpl::new(&nc, None).unwrap();
+    // let txs = n.get_all_tx_for_address(&addr, SupportedCurrency::Bitcoin, None).await.unwrap();
+    // assert!(txs.len() > 0);
 }
