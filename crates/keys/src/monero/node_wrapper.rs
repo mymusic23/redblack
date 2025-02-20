@@ -1,3 +1,5 @@
+use std::env::home_dir;
+use std::io::Write;
 use std::path::PathBuf;
 use crate::monero::rpc_core::MoneroRpcWrapper;
 use crate::monero::rpc_multisig::{ExchangeMultisigKeysResult, MakeMultisigResult};
@@ -512,15 +514,16 @@ async fn local_three_node() {
     four.set_rpcs(rpcs(4));
 
 
+    let delete = true;
     let mut one_rpc = MoneroNodeRpcInterfaceWrapper::from_config(
-        &one, s.clone(), "/disk/monerotw2","~/wallet.exp".to_string(), Some(true),
+        &one, s.clone(), "/disk/monerotw2","~/wallet.exp".to_string(), Some(delete),
     ).unwrap().unwrap();
     let mut two_rpc = MoneroNodeRpcInterfaceWrapper::from_config(
-        &two, s.clone(), "/disk/monerotw3","~/wallet.exp".to_string(), Some(true)).unwrap().unwrap();
+        &two, s.clone(), "/disk/monerotw3","~/wallet.exp".to_string(), Some(delete)).unwrap().unwrap();
     let mut three_rpc = MoneroNodeRpcInterfaceWrapper::from_config(
-        &three, s.clone(), "/disk/monerotw4","~/wallet.exp".to_string(), Some(true)).unwrap().unwrap();
+        &three, s.clone(), "/disk/monerotw4","~/wallet.exp".to_string(), Some(delete)).unwrap().unwrap();
     let mut four_rpc = MoneroNodeRpcInterfaceWrapper::from_config(
-        &four, s.clone(), "/disk/monerow","~/wallet.exp".to_string(), Some(true)).unwrap().unwrap();
+        &four, s.clone(), "/disk/monerow","~/wallet.exp".to_string(), Some(false)).unwrap().unwrap();
     
     let pub_keys = vec![
         one.public_key.clone(),
@@ -574,7 +577,15 @@ async fn local_three_node() {
         println!("Multisig address: {:?}", r.any_multisig_addr_creation());
     }
     
-    let history = rpc_vecs[0].history.clone();
+    for (i, h) in rpc_vecs.iter().enumerate() {
+        let path = home_dir().unwrap().join("multisig_history_".to_string() + &i.to_string());
+        // delete if already exists:
+        std::fs::remove_file(path.clone()).ok();
+        let mut file = std::fs::File::create(path).unwrap();
+        let secret = h.get_secret().unwrap();
+        let secret = serde_json::to_string(&secret).unwrap();
+        file.write_all(secret.as_bytes()).unwrap();
+    }
     //
     // let mut one_rpc_replicated = MoneroNodeRpcInterfaceWrapper::from_config(
     //     &one, s.clone(), "/disk/monerotw2","~/wallet.exp".to_string(), Some(true)
@@ -605,7 +616,7 @@ async fn local_three_node() {
 
     let destinations = vec![
         (Address::from_monero_external(&addr),
-        CurrencyAmount::from_fractional_cur(0.002f64, SupportedCurrency::Monero).unwrap())
+        CurrencyAmount::from_fractional_cur(0.001f64, SupportedCurrency::Monero).unwrap())
     ];
     let tx = four_rpc.wallet_rpc.send(destinations).await.unwrap();
     println!("Tx: {}", tx);

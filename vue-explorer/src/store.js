@@ -4,7 +4,9 @@ import {createStore} from 'vuex';
 export default createStore({
     state: {
         btcExchangeRate: 30000.0, // Default value
-        ethExchangeRate: 2000.0 // Default value
+        ethExchangeRate: 2000.0, // Default value
+        wasm: null, // WASM module instance
+        wasmError: null // Any WASM loading errors
     },
     getters: {
         // Getter for btcExchangeRate
@@ -13,6 +15,12 @@ export default createStore({
         },
         getEthExchangeRate: (state) => {
             return state.ethExchangeRate;
+        },
+        getWasm: (state) => {
+            return state.wasm;
+        },
+        getWasmError: (state) => {
+            return state.wasmError;
         }
     },
     mutations: {
@@ -22,6 +30,14 @@ export default createStore({
         },
         setEthExchangeRate(state, rate) {
             state.ethExchangeRate = rate;
+        },
+        setWasm(state, instance) {
+            state.wasm = instance;
+            state.wasmError = null;
+        },
+        setWasmError(state, error) {
+            state.wasmError = error;
+            state.wasm = null;
         }
     },
     actions: {

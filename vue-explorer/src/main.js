@@ -30,9 +30,26 @@ const router = createRouter({
 // Create app
 const app = createApp(App)
 
-// Use router
-app.use(router)
-app.use(store)
+// Initialize WASM before mounting the app
+const initializeWasm = async () => {
+    try {
+        // const { initWasm } = await import('./wasm/test');
+        // const { testConstant, wasm } = await initWasm();
+        // console.log('WASM Test:', testConstant);
+        // // Make wasm instance available globally and in store
+        // window.redgoldWasm = wasm;
+        // store.state.wasm = wasm;
+        // Mount app after WASM is loaded
+        app.use(router)
+        app.use(store)
+        app.mount('#app')
+    } catch (error) {
+        console.error('Failed to initialize WASM:', error);
+        // Mount app anyway to show error state
+        app.use(router)
+        app.use(store)
+        app.mount('#app')
+    }
+};
 
-// Mount app
-app.mount('#app')
+initializeWasm();
