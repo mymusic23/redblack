@@ -283,3 +283,60 @@ fn test() {
     //     println!("{:?}, {:?}", c, c)
     // }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_string() {
+        let empty_data: Vec<u8> = vec![];
+        let encoded = encode_slice(&empty_data);
+        assert_eq!(encoded, "");
+        let decoded = from(&encoded).unwrap();
+        assert_eq!(decoded, empty_data);
+    }
+
+    #[test]
+    fn test_single_byte() {
+        for i in 0u8..=255 {
+            let data = vec![i];
+            let encoded = encode_slice(&data);
+            let decoded = from(&encoded).unwrap();
+            assert_eq!(decoded, data, "Failed for byte {}", i);
+        }
+    }
+
+    #[test]
+    fn test_leading_zeros() {
+        let data = vec![0, 0, 0, 1, 2, 3];
+        let encoded = encode_slice(&data);
+        let decoded = from(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_all_zeros() {
+        let data = vec![0, 0, 0, 0];
+        let encoded = encode_slice(&data);
+        let decoded = from(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_large_numbers() {
+        let data = vec![255, 255, 255, 255];
+        let encoded = encode_slice(&data);
+        let decoded = from(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_invalid_base26_string() {
+        // Test with invalid characters
+        let result = from("ABC123"); // Contains uppercase and numbers
+        assert!(result.is_err());
+        
+        let result = from("!@#$%"); // Contains special characters
+        assert!(result.is_err());
+    }
+}
