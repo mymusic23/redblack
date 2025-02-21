@@ -186,7 +186,11 @@ impl MoneroRpcWrapper {
         Ok(response)
     }
 
-    pub async fn get_all_transactions(&self) -> RgResult<Vec<ExternalTimedTransaction>> {
+    // TODO: See if self_address can be replaced with an RPC call to wallet to ensure.
+    pub async fn get_all_transactions(&self
+                                      // , self_address: &structs::Address
+    ) -> RgResult<Vec<ExternalTimedTransaction>> {
+        // let self_addr_string = self_address.render_string()?;
         let mut hm = std::collections::HashMap::new();
         hm.insert(GetTransfersCategory::In, true);
         hm.insert(GetTransfersCategory::Out, true);
@@ -204,18 +208,38 @@ impl MoneroRpcWrapper {
         let mut results = vec![];
         for (k,v) in res.iter() {
             for vv in v.iter() {
-                let mut ett = ExternalTimedTransaction::default();
-                ett.tx_id = vv.txid.to_string();
-                ett.timestamp = Some(vv.timestamp.timestamp_millis() as u64);
-                ett.other_address = vv.address.to_string();
-                ett.amount = vv.amount.as_pico();
-                ett.currency = SupportedCurrency::Monero;
-                ett.block_number = match vv.height {
-                    TransferHeight::Confirmed(h) => Some(h.get()),
-                    TransferHeight::InPool => None,
+                let other_address = vv.note.clone();
+                let other_address_typed = structs::Address::from_monero_external(&other_address);
+                let self_address = structs::Address::from_monero_external(&vv.address.to_string());
+                // println!("{:?} vv: {:?}", k, vv);
+                // println!("{}", vv.address.to_string());
+                let amount_pico = vv.amount.as_pico();
+                let currency_amount = CurrencyAmount::from_currency(amount_pico as i64, SupportedCurrency::Monero);
+                let incoming = k == &GetTransfersCategory::In;
+                let to_addr = if incoming { self_address.clone() } else { other_address_typed.clone() };
+                let mut ett = ExternalTimedTransaction {
+                    tx_id: vv.txid.to_string(),
+                    timestamp: Some(vv.timestamp.timestamp_millis() as u64),
+                    other_address,
+                    other_output_addresses: vec![],
+                    amount: (currency_amount.to_fractional() * 1e8) as u64,
+                    bigint_amount: None,
+                    incoming,
+                    currency: SupportedCurrency::Monero,
+                    block_number: match vv.height {
+                        TransferHeight::Confirmed(h) => Some(h.get()),
+                        TransferHeight::InPool => None,
+                    },
+                    price_usd: None,
+                    fee: Some(CurrencyAmount::from_currency(vv.fee.as_pico() as i64, SupportedCurrency::Monero)),
+                    self_address: Some(self_address.render_string().unwrap()),
+                    currency_id: Some(SupportedCurrency::Monero.to_currency_id()),
+                    currency_amount: Some(currency_amount.clone()),
+                    from: if incoming { other_address_typed.clone() } else { self_address.clone() },
+                    to: vec![(to_addr, currency_amount.clone())],
+                    other: Some(other_address_typed.clone()),
+                    queried_address: Some(self_address.clone()),
                 };
-                ett.incoming = k == &GetTransfersCategory::In;
-                ett.fee = Some(CurrencyAmount::from_currency(vv.fee.as_pico() as i64, SupportedCurrency::Monero));
                 results.push(ett);
             }
         }
@@ -269,6 +293,7 @@ impl MoneroRpcWrapper {
             .await
             .map_err(|e| ErrorInfo::new(format!("Failed to get balance {}", e.to_string())))?;
         println!("balance: {:?}", b);
+        println!("balance: {:?}", b.unlocked_balance.as_pico());
         Ok(CurrencyAmount::from_currency(b.balance.as_pico() as i64, SupportedCurrency::Monero))
     }
 

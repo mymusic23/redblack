@@ -410,6 +410,46 @@ impl MoneroWalletRpcMultisigClient {
             .error_info("Failed to parse transfer_split response")?)
     }
 
+    /// Create a multisig transaction that needs to be signed by other participants
+    ///
+    /// # Arguments
+    /// * `destinations` - Vector of (address, amount) pairs for transaction outputs
+    /// * `priority` - Transaction priority (1-4, default 2)
+    /// * `ring_size` - Number of outputs to mix with (default 11)
+    ///
+    /// # Returns
+    /// * Result containing the transaction information including the multisig_txset
+    pub async fn transfer(
+        &mut self,
+        destinations: Vec<(String, u64)>,
+        priority: Option<u32>,
+        ring_size: Option<u32>,
+    ) -> RgResult<TransferResult> {
+        let mut params: Map<String, Value> = Default::default();
+        let priority = priority.unwrap_or(2);
+
+        let destinations: Vec<Map<String, Value>> = destinations
+            .into_iter()
+            .map(|(address, amount)| {
+                let mut map = Map::new();
+                map.insert("address".to_string(), json!(address));
+                map.insert("amount".to_string(), json!(amount));
+                map
+            })
+            .collect();
+
+        params.insert("destinations".to_string(), json!(destinations));
+        params.insert("priority".to_string(), json!(priority));
+        if let Some(size) = ring_size {
+            params.insert("ring_size".to_string(), json!(size));
+        }
+
+        let response = self.json_rpc_call("transfer", Params::Map(params)).await?;
+
+        Ok(serde_json::from_value(response)
+            .error_info("Failed to parse transfer_split response")?)
+    }
+
     /// Get a description of a multisig transaction before signing
     ///
     /// # Arguments
@@ -455,6 +495,31 @@ pub struct TransferSplitResult {
     pub tx_metadata_list: Vec<String>,
     pub multisig_txset: String,
     pub unsigned_txset: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct TransferResult {
+    pub amount: u64,
+    pub amounts_by_dest: AmountsByDest,
+    pub fee: u64,
+    pub multisig_txset: String,
+    pub spent_key_images: SpentKeyImages,
+    pub tx_blob: String,
+    pub tx_hash: String,
+    pub tx_key: String,
+    pub tx_metadata: String,
+    pub unsigned_txset: String,
+    pub weight: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct AmountsByDest {
+    pub amounts: Vec<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct SpentKeyImages {
+    pub key_images: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
