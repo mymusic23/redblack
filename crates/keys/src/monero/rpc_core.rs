@@ -167,7 +167,7 @@ impl MoneroRpcWrapper {
         let args = GenerateFromKeysArgs {
             restore_height: None,
             filename,
-            address: address,
+            address,
             spendkey: spend_key,
             viewkey: pk,
             password,
@@ -185,6 +185,7 @@ impl MoneroRpcWrapper {
         println!("Wallet creation response {:?}", response);
         Ok(response)
     }
+
 
     // TODO: See if self_address can be replaced with an RPC call to wallet to ensure.
     pub async fn get_all_transactions(&self
