@@ -291,8 +291,9 @@ impl MoneroWalletRpcMultisigClient {
         params.insert("multisig_info".to_string(), json!(multisig_info));
         params.insert("password".to_string(), json!(password));
 
+        println!("Finalize multisig with {} {}", multisig_info.len(), password);
         let response = self.json_rpc_call("finalize_multisig", Params::Map(params)).await?;
-
+        println!("Finalize multisig response: {:?}", response);
         let address = response.get("address")
             .and_then(|v| v.as_str())
             .ok_msg("Failed to extract address from response")?

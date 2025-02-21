@@ -4,7 +4,7 @@ use crate::word_pass_support::WordsPassNodeConfig;
 use monero::util::address::Address;
 use monero::Amount;
 use monero_rpc::monero::PrivateKey;
-use monero_rpc::{GenerateFromKeysArgs, GetBlockHeaderSelector, GetTransfersCategory, GetTransfersSelector, RpcAuthentication, RpcClient, RpcClientBuilder, TransferHeight, TransferOptions, TransferPriority, WalletCreation};
+use monero_rpc::{GenerateFromKeysArgs, GetBlockHeaderSelector, GetTransfersCategory, GetTransfersSelector, GotTransfer, RpcAuthentication, RpcClient, RpcClientBuilder, TransferHeight, TransferOptions, TransferPriority, WalletCreation};
 use redgold_schema::conf::node_config::NodeConfig;
 use redgold_schema::errors::into_error::ToErrorInfo;
 use redgold_schema::keys::words_pass::WordsPass;
@@ -186,6 +186,26 @@ impl MoneroRpcWrapper {
         Ok(response)
     }
 
+    pub async fn debug_get_all_tx(&self) -> RgResult<HashMap<GetTransfersCategory, Vec<GotTransfer>>> {
+        let mut hm = std::collections::HashMap::new();
+        hm.insert(GetTransfersCategory::In, true);
+        hm.insert(GetTransfersCategory::Out, true);
+        hm.insert(GetTransfersCategory::Pending, true);
+        hm.insert(GetTransfersCategory::Pool, true);
+        hm.insert(GetTransfersCategory::Block, true);
+        hm.insert(GetTransfersCategory::Failed, true);
+        let res = self.client.clone().wallet().get_transfers(
+            GetTransfersSelector {
+                category_selector: hm,
+                account_index: None,
+                subaddr_indices: None,
+                block_height_filter: None,
+            }
+        ).await
+            .map_err(|e| ErrorInfo::new(format!("Failed to get all {}", e.to_string())))?;
+        // println!("tx: {:?}", res);
+        Ok(res)
+    }
 
     // TODO: See if self_address can be replaced with an RPC call to wallet to ensure.
     pub async fn get_all_transactions(&self

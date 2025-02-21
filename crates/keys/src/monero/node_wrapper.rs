@@ -71,7 +71,7 @@ pub enum MoneroWalletMultisigRpcState {
     Prepared(String),
     Made(MakeMultisigResult),
     Exchanged(ExchangeMultisigKeysResult),
-    // Finalized(String),
+    Finalized(String),
     MultisigReadyToSend
 }
 
@@ -89,7 +89,7 @@ impl MoneroWalletMultisigRpcState {
             MoneroWalletMultisigRpcState::Prepared(_) => None,
             MoneroWalletMultisigRpcState::Made(m) => Some(m.address.clone()),
             MoneroWalletMultisigRpcState::Exchanged(e) => Some(e.address.clone()),
-            // MoneroWalletMultisigRpcState::Finalized(f) => Some(f.clone()),
+            MoneroWalletMultisigRpcState::Finalized(f) => Some(f.clone()),
             MoneroWalletMultisigRpcState::MultisigReadyToSend => {None}
         }
     }
@@ -202,13 +202,16 @@ impl<S: SSHOrCommandLike> MoneroNodeRpcInterfaceWrapper<S> {
     //
     // }
 
-    pub async fn restore_from_history(&mut self, h: Vec<StateHistoryItem>, wallet_filename: &String) -> RgResult<()> {
+    pub async fn restore_from_history(
+        &mut self,
+        h: Vec<StateHistoryItem>, wallet_filename: &String
+    ) -> RgResult<()> {
         self.prepare_wallet_fnm_and_set_multisig(wallet_filename).await?;
         let mut m = self.wallet_rpc.get_multisig()?;
         let is_ms = m.is_multisig().await?;
-        if is_ms.multisig {
-            return "Wallet is already multisig, did not reset properly".to_error();
-        }
+        // if is_ms.multisig {
+        //     return "Wallet is already multisig, did not reset properly".to_error();
+        // }
         for item in h.iter() {
             self.multisig_create_next(item.input_peer_strings.clone(), item.input_threshold.clone(), wallet_filename).await?;
         }
@@ -237,19 +240,21 @@ impl<S: SSHOrCommandLike> MoneroNodeRpcInterfaceWrapper<S> {
     sign_multisig() to sign the transaction
     submit_multisig() to broadcast it
      */
-    pub async fn start_multisig_creation(&mut self, wallet_filename: &String) -> RgResult<String> {
+    pub async fn start_multisig_creation(
+        &mut self,
+        wallet_filename: &String
+    ) -> RgResult<String> {
         self.prepare_wallet_fnm_and_set_multisig(wallet_filename).await?;
-
         let mut m = self.wallet_rpc.get_multisig()?;
         let is_ms = m.is_multisig().await?;
         println!("Is multisig: {:?}", is_ms);
-        let prepare_result = if is_ms.multisig {
-            let ms_info = m.export_multisig_info().await?;
-            println!("Exported multisig info: {:?}", ms_info);
-            return "Wallet is already multisig".to_error();
-        } else {
-            m.prepare_multisig().await?
-        };
+        // let prepare_result = if is_ms.multisig {
+        //     let ms_info = m.export_multisig_info().await?;
+        //     println!("Exported multisig info: {:?}", ms_info);
+        //     return "Wallet is already multisig".to_error();
+        // } else {
+        let prepare_result = m.prepare_multisig().await?;
+        // };
         self.state = MoneroWalletMultisigRpcState::Prepared(prepare_result.clone());
 
         // let ret = rpc.multisig_create_next(Some(peer_strs.clone()), Some(2), &mpi).await.unwrap();
@@ -359,14 +364,16 @@ impl<S: SSHOrCommandLike> MoneroNodeRpcInterfaceWrapper<S> {
                 ).await?;
             }
             MoneroWalletMultisigRpcState::Exchanged(_) => {
-                self.state = MoneroWalletMultisigRpcState::MultisigReadyToSend;
-                // self.finalize_multisig(
-                //     peer_strings.ok_msg("missing peer strings in finalize multisig")?
-                // ).await?;
+                let mut m = self.wallet_rpc.get_multisig()?;
+                let f = m.finalize_multisig(
+                    peer_strings.ok_msg("missing peer strings in finalize multisig")?,
+                    "".to_string(),
+                ).await?;
+                self.state = MoneroWalletMultisigRpcState::Finalized(f);
             }
-            // MoneroWalletMultisigRpcState::Finalized(a) => {
-            //     self.state = MoneroWalletMultisigRpcState::MultisigReadyToSend;
-            // }
+            MoneroWalletMultisigRpcState::Finalized(a) => {
+                self.state = MoneroWalletMultisigRpcState::MultisigReadyToSend;
+            }
             MoneroWalletMultisigRpcState::MultisigReadyToSend => {
                 return "Multisig wallet is ready to send transactions, but create next called".to_error()
             }
@@ -543,76 +550,103 @@ async fn local_three_node() {
         two.public_key.clone(),
         three.public_key.clone()
     ];
-    let mut mpi = MultipartyIdentifier::default();
-    mpi.party_keys = pub_keys.clone();
-    mpi.threshold = Some(Weighting::from_int_basis(2, 3));
-    mpi.room_id = Some(RoomId{
-        uuid: Some("test".to_string()),
-    });
-    let fnm = mpi.proto_serialize_hex().first_n(12).unwrap();
+    // let mut mpi = MultipartyIdentifier::default();
+    // mpi.party_keys = pub_keys.clone();
+    // mpi.threshold = Some(Weighting::from_int_basis(2, 3));
+    // mpi.room_id = Some(RoomId{
+    //     uuid: Some("test".to_string()),
+    // });
+    let fnm = "test_multisig".to_string();
+    // let fnm = mpi.proto_serialize_hex().first_n(12).unwrap();
+
+    println!("Starting test on fnm {}", fnm.clone());
     //
     let mut rpc_vecs = vec![one_rpc.clone(), two_rpc.clone(), three_rpc.clone()];
 
 
-    // let mut peer_strs = vec![];
-    //
-    //
-    // let mut loop_vec = vec![];
-    // loop {
-    //     let mut new_peer_strs = vec![];
-    //     let mut last_ret = MoneroWalletMultisigRpcState::Unknown;
-    //     let mut i = 0;
-    //     for rpc in rpc_vecs.iter_mut() {
-    //         let ret = rpc.multisig_create_next(
-    //             Some(peer_strs.clone()),
-    //             Some(2),
-    //             &fnm
-    //         ).await.unwrap();
-    //
-    //         if i == 0 {
-    //             loop_vec.push(ret.clone());
-    //         }
-    //         i += 1;
-    //         println!("DONE wallet for peer {:?}", ret);
-    //         ret.multisig_info_string().map(|ss| new_peer_strs.push(ss));
-    //         if let Some(a) = ret.multisig_address_str() {
-    //             if !a.is_empty() {
-    //                 println!("Multisig address: {}", a);
-    //             }
-    //         }
-    //        last_ret = ret;
-    //     }
-    //     peer_strs = new_peer_strs.clone();
-    //     if let MoneroWalletMultisigRpcState::MultisigReadyToSend = last_ret {
-    //         break;
-    //     }
-    // }
-    //
+    let mut peer_strs: Vec<String> = vec![];
 
+
+    let mut loop_vec = vec![];
+    loop {
+        let mut new_peer_strs = vec![];
+        let mut last_ret = MoneroWalletMultisigRpcState::Unknown;
+
+        for (idx, rpc) in rpc_vecs.iter_mut().enumerate() {
+            let this_peer_strs = peer_strs.iter().enumerate().filter(
+                |(i, _)| *i != idx
+            ).map(|(_, s)| s.clone()).collect::<Vec<String>>();
+            let ret = rpc.multisig_create_next(
+                Some(this_peer_strs.clone()),
+                Some(2),
+                &fnm
+            ).await.unwrap();
+
+            if idx == 0 {
+                loop_vec.push(ret.clone());
+            }
+            println!("DONE wallet for peer {:?}", ret);
+            ret.multisig_info_string().map(|ss| new_peer_strs.push(ss));
+            if let Some(a) = ret.multisig_address_str() {
+                if !a.is_empty() {
+                    println!("Multisig address: {}", a);
+                }
+            }
+           last_ret = ret;
+        }
+        peer_strs = new_peer_strs.clone();
+        if let MoneroWalletMultisigRpcState::MultisigReadyToSend = last_ret {
+            break;
+        }
+    }
+
+    //
     let mut rpc_addrs_0 = vec![];
+    //
+    // for (i, h) in rpc_vecs.iter_mut().enumerate() {
+    //     let path = home_dir().unwrap().join("multisig_history_".to_string() + &i.to_string());
+    //     // delete if already exists:
+    //
+    //     let data = std::fs::read_to_string(path.clone()).ok().unwrap().json_from::<PartySecretInstanceData>().unwrap();
+    //     let history = data.monero_history.clone().unwrap();
+    //
+    //     println!("Restoring from history: {:?}", history.len());
+    //     for i in history.iter() {
+    //         println!("History item: {:?}", i);
+    //     }
+    //     println!("------------");
+    //     h.state = MoneroWalletMultisigRpcState::Unknown;
+    //     h.wallet_rpc.close_wallet().await.unwrap();
+    //     h.wallet_rpc.open_wallet_filename(fnm.clone()).await.unwrap();
+    //     // h.restore_from_history(data.monero_history.unwrap(), &fnm).await.unwrap();
+    //     for item in history {
+    //         println!("Restoring from history item: {:?}", item);
+    //         h.state = item.input_state.clone();
+    //         if let Err(e) = h.multisig_create_next(item.input_peer_strings.clone(), item.input_threshold.clone(), &fnm.clone()).await {
+    //             println!("Error: {:?}", e.message);
+    //         }
+    //     }
+    //
+    // }
+
+    let mut msig_strs = vec![];
 
     for (i, h) in rpc_vecs.iter_mut().enumerate() {
+        let info = h.export_multisig_info().await.unwrap();
+        msig_strs.push(info);
+    }
+    for (i, h) in rpc_vecs.iter_mut().enumerate() {
+        let info = h.import_multisig_info(msig_strs.clone()).await.unwrap();
+        println!("Imported multisig info: {:?}", info);
+    }
 
-
-        let path = home_dir().unwrap().join("multisig_history_".to_string() + &i.to_string());
-        // delete if already exists:
-
-        let data = std::fs::read_to_string(path.clone()).ok().unwrap().json_from::<PartySecretInstanceData>().unwrap();
-
-        h.history = data.monero_history.clone().unwrap();
-        h.state = MoneroWalletMultisigRpcState::MultisigReadyToSend;
-        h.wallet_rpc.close_wallet().await.unwrap();
-        h.wallet_rpc.open_wallet_filename(fnm.clone()).await.unwrap();
-        h.restore_from_history(data.monero_history.clone().unwrap(), &fnm).await.unwrap();
-        // h.wallet_rpc.self_address()
-
+    for (i, h) in rpc_vecs.iter_mut().enumerate() {
         println!("Multisig address: {:?}", h.any_multisig_addr_history());
         println!("Multisig balance {:?}", h.wallet_rpc.get_balance().await.unwrap().to_fractional());
         let a = h.wallet_rpc.client.clone().wallet().get_address(0, None).await
             .unwrap().address.to_string();
         rpc_addrs_0.push(a.clone());
         println!("RPC Address: {}", a)
-        // h.restore_from_history(data.monero_history.unwrap(), &fnm).await.unwrap();
 
         // std::fs::remove_file(path.clone()).ok();
         // let mut file = std::fs::File::create(path).unwrap();
@@ -655,41 +689,43 @@ async fn local_three_node() {
     //
     //
     //
-    // // MULTISIG SEND
-    // let dest = four_rpc.wallet_rpc.self_address().unwrap();
-    // let amt =  CurrencyAmount::from_fractional_cur(0.004f64, SupportedCurrency::Monero).unwrap();
-    // let send = vec![(dest, amt)];
-    // let mut one = rpc_vecs.get(0).cloned().unwrap();
-    // let (prep, tx) = one.multisig_send_prepare_and_sign(send).await.unwrap();
-    // println!("Prepared: {:?}", prep);
-    // println!("Tx: {:?}", tx);
-    // let two = rpc_vecs.get(1).cloned().unwrap();
-    // let res = two.wallet_rpc.clone().get_multisig().unwrap()
-    //     .sign_multisig(prep.multisig_txset.clone()).await.unwrap();
-    // println!("Sign: {:?}", res);
+    // MULTISIG SEND
+    let dest = four_rpc.wallet_rpc.self_address().unwrap();
+    let amt =  CurrencyAmount::from_fractional_cur(0.004f64, SupportedCurrency::Monero).unwrap();
+    let send = vec![(dest, amt)];
+    let mut one = rpc_vecs.get(0).cloned().unwrap();
+    let (prep, tx) = one.multisig_send_prepare_and_sign(send).await.unwrap();
+    println!("Prepared: {:?}", prep);
+    println!("Tx: {:?}", tx);
+    let two = rpc_vecs.get(1).cloned().unwrap();
+    let res = two.wallet_rpc.clone().get_multisig().unwrap()
+        .sign_multisig(prep.multisig_txset.clone()).await.unwrap();
+    println!("Sign: {:?}", res);
     // let finalized = one.wallet_rpc.clone().get_multisig().unwrap()
     //     .finalize_multisig(vec![tx.tx_data_hex, res.tx_data_hex], "".to_string()).await.unwrap();
     // println!("Finalized: {:?}", finalized);
     // let submit = one.wallet_rpc.clone().get_multisig().unwrap()
     //     .submit_multisig(finalized).await.unwrap();
     // println!("Submit: {:?}", submit);
+
+
     //
-
-
-    // for tx in four_rpc.wallet_rpc.get_all_transactions().await.unwrap() {
-    //     // println!("Tx: {:?}", tx);
+    // for (cat, tx) in four_rpc.wallet_rpc.debug_get_all_tx().await.unwrap() {
+    //     for t in tx {
+    //         println!("Tx: {:?} {:?}", cat, t);
+    //     }
     // }
     //
     // let destinations = vec![
-    //     (Address::from_monero_external(&addr),
-    //     CurrencyAmount::from_fractional_cur(0.001f64, SupportedCurrency::Monero).unwrap())
+    //     (Address::from_monero_external(&rpc_addrs_0.get(0).cloned().unwrap()),
+    //     CurrencyAmount::from_fractional_cur(0.011f64, SupportedCurrency::Monero).unwrap())
     // ];
     // let tx = four_rpc.wallet_rpc.send(destinations).await.unwrap();
     // println!("Tx: {}", tx);
 
     // let amt = b.to_fractional() / 10;
-
-    // let (tx, signed) = four_rpc.multisig_send_prepare_and_sign(vec![(Address::from_monero_external(&addr), 
+    //
+    // let (tx, signed) = four_rpc.multisig_send_prepare_and_sign(vec![(Address::from_monero_external(&addr),
     // CurrencyAmount::from_fractional_cur(100_000_000_000, SupportedCurrency::Monero))]).await.unwrap();
     // println!("Tx: {}", tx);
 
