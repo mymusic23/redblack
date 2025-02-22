@@ -14,6 +14,7 @@ use crate::monero::key_derive::MoneroSeedBytes;
 use crate::TestConstants;
 use crate::util::mnemonic_support::MnemonicSupport;
 use std::time::Duration;
+use itertools::Itertools;
 use log::info;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use regex::Regex;
@@ -208,14 +209,14 @@ impl MoneroWalletCli {
         // tokio::time::sleep(Duration::from_secs(5)).await;
         //
         // tokio::time::sleep(Duration::from_secs(2)).await;
-        tokio::time::sleep(Duration::from_secs(10)).await;
-        cli.time(4);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        cli.time(2);
         cli.expect_wallet().await?;
         cli.write("set enable-multisig-experimental 1").await?;
         cli.try_read_expect("Wallet password:").await?;
         cli.write("").await?;
         cli.expect_wallet().await?;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
         cli.write("set ask-password 0").await?;
         cli.try_read_expect("Wallet password:").await?;
         cli.write("").await?;
@@ -224,10 +225,11 @@ impl MoneroWalletCli {
         cli.try_read_expect("Wallet password:").await?;
         cli.write("").await?;
         cli.expect_wallet().await?;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
         cli.write("set").await?;
-        cli.time(8);
+        cli.time(10);
         cli.try_read_expect("enable-multisig-experimental = 1").await?;
+        cli.time(2);
         let mut i = 0;
         loop {
             i += 1;
@@ -236,22 +238,39 @@ impl MoneroWalletCli {
             } else {
                 break;
             }
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
             if i > 2 {
                 break;
             }
         }
         println!("Synced");
-
+        cli.time(4);
         cli.write("prepare_multisig").await?;
         let out = cli.try_read_expect(
             "This includes the PRIVATE view key, so needs to be disclosed only to that multisig wallet's participants")
             .await?;
-        let multisig_prepared = Self::regex(r"(Multisig.*?)Send", out)?;
+
+        /*
+        Example using generated wallet
+        --------------------------------------------------------------------------------
+        MultisigxV2R1TgViniqUsZqjpEk4tkZUbmZax1Q87igiCXTPgYRQGc1LhSHoLMWF6zm7K82eNgwCdUcixV3i6oJJxcYjkhL7V6WoN7kHFNhBckcgNMMkXbm8sfhKwuZE7yQa8HCPAcG6j8ebjjH79hVMeQBWL6q5wRUETwJiUrXkhhe3dg3PKopZE11b
+        Send this multisig info to all other participants, then use make_multisig <threshold> <info1> [<info2>...] with others' multisig info
+        This includes the PRIVATE view key, so needs to be disclosed only to that multisig wallet's participants
+         */
+        cli.time(2);
+        let multisig_prepared = Self::split_extract_multisig(out)?;
 
         Ok((cli, multisig_prepared))
     }
 
+    fn split_extract_multisig(out: String) -> Result<String, ErrorInfo> {
+        let vec = out.split("Multisig").collect::<Vec<&str>>();
+        let vec = vec.get(1).ok_msg("Missing multisig info")?.clone();
+        let vec = vec.split("Send").collect::<Vec<&str>>();
+        let vec = vec.get(0).ok_msg("Missing multisig info")?.clone().trim().replace("\n", "");
+        let multisig_prepared = format!("Multisig{}", vec);
+        Ok(multisig_prepared)
+    }
 
     pub async fn password(&self) -> RgResult<()> {
         self.try_read_expect("Wallet password:").await?;
@@ -264,17 +283,43 @@ impl MoneroWalletCli {
         Ok(out.contains("out of sync"))
     }
 
-    pub async fn make_multisig(&self, threshold: i64, peer_strings: Vec<String>) -> RgResult<String> {
+    pub async fn make_multisig(&mut self, threshold: i64, peer_strings: Vec<String>) -> RgResult<String> {
         let cmd = format!("make_multisig {} {}", threshold, peer_strings.join(" "));
         self.write(cmd).await?;
+        self.time(2);
         self.password().await?;
-        self.try_read().await
+        self.time(6);
+        let out = self.try_read().await?;
+        let ms = Self::split_extract_multisig(out)?;
+        Ok(ms)
     }
 
-    pub async fn exchange_multisig_keys(&self, peer_strings: Vec<String>) -> RgResult<String> {
+    /*
+    Another step is needed
+MultisigxV2Rn1WCSNqbsjuTXaPVfFsk3ekFF444yFN5PMCXcQHv1Pv794ZdkDZRnfVGgeP5JwpysR3ingQtQMMnmQDEXnP4qgdnh3SU2NXvfe7kMaSxMafTdPn48ko52e8UHvA4kWwpuPidBYg5JdJwdEAh8Ud7kBFX34zP33ZBbrYXcQbQKTcM3XQ8AEP8bVXHVqQSGzkAkjZRp3H63k6ZSXSYdH9WaC9pdr9FV3tx
+Send this multisig info to all other participants, then use exchange_multisig_keys <info1> [<info2>...] with others' multisig info
+
+Multisig wallet has been successfully created. Current wallet type: 2/3
+Multisig address: 56MD1L4zky3bFXDQb9qvSx7PDbg8F4x1HgPrFNrDnGnYDqFZcWGswWc1p2moFa1F44ccJniY9Wkzk6urkJbEDvubHqYtkcs
+
+     */
+    pub async fn exchange_multisig_keys(&mut self, peer_strings: Vec<String>) -> RgResult<(String, bool)> {
         let cmd = format!("exchange_multisig_keys {}", peer_strings.join(" "));
         self.write(cmd).await?;
-        self.try_read().await
+        self.time(2);
+        self.password().await?;
+        self.time(10);
+        let all = self.try_read().await?;
+        println!("All: {}", all.clone());
+        let more_rounds = all.contains("Another step is needed");
+        let result = if more_rounds {
+            Self::split_extract_multisig(all)?
+        } else {
+            let split = all.split("Multisig address: ").collect_vec();
+            split.get(1).ok_msg("Missing multisig address")?.trim().replace("\n", "").to_string()
+        };
+
+        Ok((result, more_rounds))
     }
 
     pub fn regex(pat: impl Into<String>, out: String) -> RgResult<String> {
@@ -282,6 +327,7 @@ impl MoneroWalletCli {
             .unwrap().find(out.as_str()).map(|m| m.as_str().trim().to_string())
             .ok_msg("Missing multisig info")
     }
+
 
     pub async fn expect_wallet(&self) -> RgResult<String> {
         self.try_read_expect("[wallet").await
@@ -339,14 +385,24 @@ async fn test_new_wallet() {
     let j2 = test_wallet(ci2, 2).await;
     let j3 = test_wallet(ci3, 3).await;
 
-    let (c1, p1) = j1.await.unwrap().unwrap();
-    let (c2, p2) = j2.await.unwrap().unwrap();
-    let (c3, p3) = j3.await.unwrap().unwrap();
+    let (mut c1, p1) = j1.await.unwrap().unwrap();
+    let (mut c2, p2) = j2.await.unwrap().unwrap();
+    let (mut c3, p3) = j3.await.unwrap().unwrap();
 
-    let m1 = c1.make_multisig(2, vec![p2.clone(), p3.clone()]).await.unwrap();
-    let m2 = c2.make_multisig(2, vec![p1.clone(), p3.clone()]).await.unwrap();
-    let m3 = c3.make_multisig(2, vec![p1.clone(), p2.clone()]).await.unwrap();
-    // c2.exchange_multisig_keys(vec![p1.clone(), p3.clone()]).await.unwrap();
+    let mut m1 = c1.make_multisig(2, vec![p2.clone(), p3.clone()]).await.unwrap();
+    let mut m2 = c2.make_multisig(2, vec![p1.clone(), p3.clone()]).await.unwrap();
+    let mut m3 = c3.make_multisig(2, vec![p1.clone(), p2.clone()]).await.unwrap();
+    let mut more_rounds = true;
+
+    loop {
+        (m1, more_rounds) = c1.exchange_multisig_keys(vec![m2.clone(), m3.clone()]).await.unwrap();
+        (m2, _) = c2.exchange_multisig_keys(vec![m1.clone(), m3.clone()]).await.unwrap();
+        (m3, _) = c3.exchange_multisig_keys(vec![m1.clone(), m2.clone()]).await.unwrap();
+        if !more_rounds {
+            break
+        }
+    }
+
     // println!("m1: {}", m1);
     // println!("m2: {}", m2);
     // println!("m3: {}", m3);

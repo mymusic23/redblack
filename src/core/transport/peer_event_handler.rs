@@ -206,6 +206,6 @@ impl PeerOutgoingEventHandler {
 }
 
 pub async fn rest_peer(relay: &Relay, ip: String, port: i64, request: Request, intended_pk: &structs::PublicKey) -> Result<Response, ErrorInfo> {
-    let client = redgold_common::client::http::RgHttpClient::new(ip, port as u16, Some(Box::new(relay.clone())));
+    let mut client = redgold_common::client::http::RgHttpClient::new(ip, port as u16, Some(Box::new(relay.clone())));
     client.proto_post_request(request, Some(relay.node_metadata().await?), Some(intended_pk)).await
 }

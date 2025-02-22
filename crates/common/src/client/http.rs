@@ -267,6 +267,10 @@ impl RgHttpClient {
         nmd: Option<NodeMetadata>,
         intended_pk: Option<&PublicKey>
     ) -> Result<Response, ErrorInfo> {
+        let mut self2 = self.clone();
+        if let Some(ms) = &r.request_client_timeout_millis {
+            self2.timeout = Duration::from_millis(ms.clone() as u64);
+        }
         if r.trace_id.is_none() {
             r.trace_id = Some(Uuid::new_v4().to_string());
         }
@@ -277,7 +281,7 @@ impl RgHttpClient {
         if let Some(signer) = self.auth.as_ref() {
             r = signer.sign_request(&r)?;
         }
-        let result = self.proto_post(&r, "request_proto".to_string()).await?;
+        let result = self2.proto_post(&r, "request_proto".to_string()).await?;
         result.as_error_info().add("Response metadata found as errorInfo")?;
         let string = result.json_or();
         if let Some(signer) = self.auth.as_ref() {

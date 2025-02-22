@@ -53,6 +53,7 @@ message Request {
   NotifyMultisigCreationRequest notify_multisig_creation_request = 46;
   GetPartyMetadataRequest get_party_metadata_request = 47;
   ExtendedNodeMetadataRequest extended_node_metadata_request = 48;
+  optional int64 request_client_timeout_millis = 49;
 }
 
 message ExtendedNodeMetadataRequest {
