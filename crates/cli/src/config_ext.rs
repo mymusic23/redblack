@@ -39,12 +39,16 @@ pub fn get_input(prompt: impl Into<String>, is_password: bool) -> RgResult<Optio
 }
 
 pub trait NodeConfigExt {
-    fn cli_get_words_pass(&self) -> WordsPass;
+    fn cli_get_words_pass(&self, default_behavior: bool) -> WordsPass;
 }
 
 impl NodeConfigExt for NodeConfig {
-    fn cli_get_words_pass(&self) -> WordsPass {
-        let pass = self.config_data.cli.as_ref().and_then(|c| c.passphrase.clone()).unwrap_or(false);
+    fn cli_get_words_pass(&self, default_behavior: bool) -> WordsPass {
+        // TODO move to nodeconfig impl
+        let mut pass = self.config_data.cli.as_ref().and_then(|c| c.passphrase.clone()).unwrap_or(default_behavior);
+        if self.config_data.cli.as_ref().and_then(|c| c.non_interactive.clone()).unwrap_or(false) {
+            pass = false;
+        }
 
         let pass = if pass {
             get_input("Enter passphrase: ", true)
@@ -63,4 +67,5 @@ impl NodeConfigExt for NodeConfig {
 
         WordsPass::new(default, pass)
     }
+
 }

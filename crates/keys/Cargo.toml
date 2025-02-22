@@ -42,6 +42,7 @@ log = "0.4.20"
 #pbkdf2 = "0.12.2"
 #rand_core = "0.6.4"
 monero = "0.19.0"
+#monero-seed = "0.0.1"
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 monero-rpc = { version = "0.4.0", features = ["rpc_authentication"] }
 jsonrpc-core = "18.0.0"
@@ -54,6 +55,7 @@ uuid = { version = "0.8.2", features = ["v4"] }
 #version = "0.21"
 #features = ["serde", "bitcoinconsensus"]
 #ethereum-types = "0.14.1"
+portable-pty = "0.9.0"
 
 ed25519-dalek = "2.1.1"
 #ed25519-dalek = "1.0.1"
@@ -74,6 +76,7 @@ metrics = {workspace = true}
 regex = "1.10.6"
 
 redgold-safe-bindings = { workspace = true}
+flume = {workspace = true}
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 sequoia-openpgp = { version = "1.21.2" }

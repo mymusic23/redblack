@@ -32,7 +32,7 @@ use redgold_keys::util::mnemonic_support::MnemonicSupport;
 use redgold_keys::word_pass_support::{NodeConfigKeyPair, WordsPassNodeConfig};
 use redgold_keys::KeyPair;
 use redgold_schema::conf::node_config::NodeConfig;
-use redgold_schema::conf::rg_args::{AddServer, BalanceCli, ColdWordMixer, DebugCommand, Deploy, FaucetCli, QueryCli, RgDebugCommand, TestTransactionCli, WalletAddress, WalletSend};
+use redgold_schema::conf::rg_args::{AddServer, BalanceCli, ColdWordMixer, DebugCommand, Deploy, FaucetCli, NostrKey, QueryCli, RgDebugCommand, TestTransactionCli, WalletAddress, WalletSend};
 use redgold_schema::helpers::easy_json::EasyJson;
 use redgold_schema::helpers::easy_json::{json, json_from, json_pretty};
 use redgold_schema::helpers::with_metadata_hashable::WithMetadataHashable;
@@ -198,7 +198,7 @@ pub async fn faucet(p0: &FaucetCli, p1: &NodeConfig) -> Result<(), ErrorInfo>  {
 
 pub async fn balance_lookup(request: &BalanceCli, nc: &Box<NodeConfig>) -> Result<(), ErrorInfo> {
     // TODO: Get keypair from prior cli steps.
-    let words = nc.cli_get_words_pass();
+    let words = nc.cli_get_words_pass(false);
     let ext = ExternalNetworkResourcesImpl::new(nc, None).unwrap();
     let kp = words.keypair_at_change(0).expect("works");
     if let Some(a) = request.address.as_ref() {
@@ -619,6 +619,9 @@ pub async fn debug_commands(p0: &DebugCommand, nc: &Box<NodeConfig>) -> RgResult
                 }
                 Ok(())
             }
+            RgDebugCommand::NostrKey(n) => {
+                cli_nostr_kp(n.clone(), nc).await
+            }
 
             _ => {
                 Ok(())
@@ -714,7 +717,8 @@ async fn copy_usb_info(p1: &Box<NodeConfig>) -> RgResult<()> {
 }
 
 pub async fn cold_mix(c: ColdWordMixer, nc: &NodeConfig) -> RgResult<()> {
-    let words = nc.secure_mnemonic_words().unwrap();
+
+    let words = nc.cli_get_words_pass(false);
     let pass = get_input("Enter mixing password:", true).unwrap().unwrap();
     // let phrase = get_input("Enter wallet passphrase:", true).await?;
     let start = current_time_millis();
@@ -722,7 +726,7 @@ pub async fn cold_mix(c: ColdWordMixer, nc: &NodeConfig) -> RgResult<()> {
     let m_cost= 65536;
     let p_cost= 2;
     let t_cost= c.iterations as u32;
-    let sec_words = WordsPass::new(&words, None);
+    let sec_words = words;
     let words_from = sec_words.validate();
     let m = words_from.unwrap();
     let seed = m.seed();
@@ -733,5 +737,30 @@ pub async fn cold_mix(c: ColdWordMixer, nc: &NodeConfig) -> RgResult<()> {
     let delta_seconds = ((end - start) as f64) / 1000.0;
     tracing::info!("Argon2d took {} seconds", delta_seconds.clone());
     println!("{}", w.words);
+    Ok(())
+}
+
+pub async fn cli_nostr_kp(c: NostrKey, nc: &NodeConfig) -> RgResult<()> {
+    let sec_words = nc.cli_get_words_pass(true);
+    let mixing_pass = "nostr";
+    let derivation_path = format!("m/44'/1237'/{}'/0/0", c.account);
+    let start = current_time_millis();
+    let m_cost= 65536;
+    let p_cost= 2;
+    let t_cost= c.iterations as u32;
+    let words_from = sec_words.validate();
+    let m = words_from.unwrap();
+    let seed_checksum = m.checksum().unwrap();
+    println!("Seed checksum {}", seed_checksum);
+    let seed = m.seed();
+    let salt = seed.expect("works").to_vec();
+    let result = argon2d_hash(salt, mixing_pass.as_bytes().to_vec(), m_cost, t_cost, p_cost).unwrap();
+    let w = WordsPass::from_bytes(&*result).ok().unwrap();
+    let end = current_time_millis();
+    let delta_seconds = ((end - start) as f64) / 1000.0;
+    tracing::info!("Argon2d took {} seconds", delta_seconds.clone());
+    // println!("{}", w.words);
+    let pk_hex = w.private_at(derivation_path).expect("works");
+    println!("{}", pk_hex);
     Ok(())
 }

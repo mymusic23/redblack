@@ -448,8 +448,7 @@ jobs:
           cargo install cargo-workspaces &&
           cargo login ${{ secrets.CARGO_TOKEN }} &&
           ./bin/install_build_deps.sh &&
-          cargo workspaces publish --no-git-commit
-
+          cargo workspaces publish --no-git-commit --allow-dirty --no-confirm
       - name: Download redgold_mac artifact
         uses: actions/download-artifact@v4
         with:

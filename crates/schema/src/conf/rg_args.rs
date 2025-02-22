@@ -434,6 +434,7 @@ pub enum RgDebugCommand {
     CopyData(CopyData),
     Usb(CopyUsb),
     ServerInfo(ServerInfo),
+    NostrKey(NostrKey),
 }
 
 #[derive(Args, Debug, Clone, Serialize, Deserialize)]
@@ -471,6 +472,16 @@ pub struct CopyUsb {
 /// S3 copy command
 #[derive(Args, Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfo {
+
+}
+
+/// Derive Nostr key
+#[derive(Args, Debug, Clone, Serialize, Deserialize)]
+pub struct NostrKey {
+    #[clap(short,long, default_value = "0")]
+    pub account: i64,
+    #[clap(long, default_value = "100")]
+    pub iterations: i64
 
 }
 

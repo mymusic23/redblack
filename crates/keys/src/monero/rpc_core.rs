@@ -13,6 +13,7 @@ use redgold_schema::structs::{self, CurrencyAmount, ErrorInfo, NetworkEnvironmen
 use redgold_schema::tx::external_tx::ExternalTimedTransaction;
 use redgold_schema::{ErrorInfoContext, RgResult, SafeOption, ShortString};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::time::Duration;
@@ -123,10 +124,13 @@ impl MoneroRpcWrapper {
         password: Option<String>,
         wallet_pfx: Option<String>,
         wallet_filename: Option<String>,
+        restore_height: Option<i64>,
     ) -> RgResult<()> {
         // println!("Registering key: {}", view_key);
         // println!("Registering key address: {}", address);
-        let res = self.register_key(view_key, address, spend_key, password, wallet_pfx, wallet_filename).await;
+        let res = self.register_key(
+            view_key, address, spend_key, password, wallet_pfx, wallet_filename, restore_height
+        ).await;
         if MoneroRpcWrapper::check_error_message_already_registered(&res) {
             Ok(())
         } else {
@@ -134,9 +138,15 @@ impl MoneroRpcWrapper {
         }
     }
 
-    pub async fn register_self_activate_ok(&self, wallet_filename: Option<String>) -> RgResult<()> {
-        self.register_dupe_ok(self.view_key()?, self.self_address_str()?, Some(self.spend_key()?), None, None, wallet_filename.clone()).await?;
-        self.open_wallet_filename(wallet_filename.clone().ok_msg("Missing wallet filename")?).await
+    pub async fn register_self_activate_ok(
+        &self, wallet_filename: Option<String>,
+        restore_height: Option<i64>
+    ) -> RgResult<()> {
+        self.register_dupe_ok(self.view_key()?,
+                              self.self_address_str()?, Some(self.spend_key()?), None, None, wallet_filename.clone(),
+                                restore_height
+        ).await?;
+        self.open_wallet_filename_exact_no_prefix(wallet_filename.clone().ok_msg("Missing wallet filename")?).await
     }
 
     pub async fn register_key(
@@ -147,6 +157,7 @@ impl MoneroRpcWrapper {
         password: Option<String>,
         wallet_pfx: Option<String>,
         wallet_filename: Option<String>,
+        restore_height: Option<i64>,
     ) -> RgResult<WalletCreation> {
         let password = password.unwrap_or("".to_string());
         let filename = address.last_n(12)?;
@@ -164,8 +175,10 @@ impl MoneroRpcWrapper {
             None => None,
         };
 
+        let mut restore_height = restore_height.map(|r| r as u64);
+
         let args = GenerateFromKeysArgs {
-            restore_height: None,
+            restore_height,
             filename,
             address,
             spendkey: spend_key,
@@ -174,7 +187,7 @@ impl MoneroRpcWrapper {
             autosave_current: None,
         };
         // println!("Registering on url: {} auth: {}", self.url, self.auth_str.clone().unwrap_or("".to_string()));
-        // println!("Registering with args: {:?}", args);
+        println!("Registering with args: {:?}", args);
         let response = client.generate_from_keys(
             args
         ).await
@@ -267,7 +280,7 @@ impl MoneroRpcWrapper {
         Ok(results)
     }
 
-    pub async fn open_wallet_filename(&self, filename: String) -> RgResult<()> {
+    pub async fn open_wallet_filename_exact_no_prefix(&self, filename: String) -> RgResult<()> {
         let res = self.client.clone().wallet()
             .open_wallet(filename.clone(), None).await
             .map_err(|e| ErrorInfo::new(format!("Failed to activate wallet {}", e.to_string())))
@@ -278,7 +291,7 @@ impl MoneroRpcWrapper {
     pub async fn activate_wallet(&self, address: String, prefix: Option<String>) -> RgResult<()> {
         let filename = address.last_n(12)?;
         let filename = prefix.map(|p| format!("{}{}", p, filename)).unwrap_or(filename);
-        let res = self.open_wallet_filename(filename).await
+        let res = self.open_wallet_filename_exact_no_prefix(filename).await
         .with_detail("address", address.clone());
         res
     }
@@ -287,6 +300,17 @@ impl MoneroRpcWrapper {
         let sync_info = self.client.clone().wallet().get_height().await
             .map_err(|e| ErrorInfo::new(format!("Failed to get height {}", e.to_string())))?;
         Ok(sync_info)
+    }
+    
+    pub async fn wallet_height(&self) -> RgResult<i64> {
+        let mut sync_info = self.sync_info().await?;
+        Ok(sync_info.get() as i64)
+    }
+    
+    pub async fn daemon_height(&self) -> RgResult<i64> {
+        let mut height = self.client.clone().daemon().get_block_count().await
+            .map_err(|e| "Failed to get daemon height".to_error_info().enhance(e.to_string()))?;
+        Ok(height.get() as i64)
     }
 
     pub async fn refresh_sync_check_wallet(&self) -> RgResult<NonZeroU64> {
@@ -298,6 +322,21 @@ impl MoneroRpcWrapper {
                 return Ok(sync_info)
             }
             println!("Waiting for wallet to sync...from {} to {}", sync_info, sync_info_2);
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        };
+    }
+
+    pub async fn refresh_sync_check_daemon_against_wallet(
+        &self,
+        wallet_rpc: MoneroRpcWrapper) -> RgResult<i64> {
+        loop {
+            let daemon_height = self.daemon_height().await?;
+            // tokio::time::sleep(Duration::from_secs(5)).await;
+            let wallet_height = wallet_rpc.wallet_height().await?;
+            if daemon_height == wallet_height {
+                return Ok(daemon_height)
+            }
+            println!("Waiting for wallet to sync...from wallet height {} to daemon height {}", wallet_height, daemon_height);
             tokio::time::sleep(Duration::from_secs(10)).await;
         };
     }

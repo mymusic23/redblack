@@ -188,10 +188,11 @@ impl MoneroWalletRpcMultisigClient {
         if let Some(force) = force_update_use_with_caution {
             params.insert("force_update_use_with_caution".to_string(), json!(force));
         } else {
-            params.insert("force_update_use_with_caution".to_string(), json!(true));
+            params.insert("force_update_use_with_caution".to_string(), json!(false));
         }
+        println!("exchange multisig request with {:?}", params);
         let response = self.json_rpc_call("exchange_multisig_keys", Params::Map(params)).await?;
-
+        println!("exchange multisig response: {:?}", response);
         let address = response.get("address")
             .and_then(|v| v.as_str())
             .ok_msg("Failed to extract address from response")?
@@ -204,7 +205,9 @@ impl MoneroWalletRpcMultisigClient {
 
         Ok(ExchangeMultisigKeysResult {
             address,
-            multisig_info
+            multisig_info,
+            input_round: 0,
+            output_round: 0,
         })
     }
     /// Export multisig info for other participants
@@ -550,7 +553,9 @@ pub struct SignedMultisigTxset {
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct ExchangeMultisigKeysResult {
     pub address: String,
-    pub multisig_info: String
+    pub multisig_info: String,
+    pub input_round: i64,
+    pub output_round: i64
 }
 #[derive(Serialize, Deserialize, Debug, Default, PartialEq, Clone)]
 pub struct MakeMultisigResult {

@@ -139,7 +139,7 @@ impl<B: 'static> TryRecvForEach<MoneroSyncInteraction> for MoneroWalletSyncWrite
                 let iface = self.wallet_interface.clone();
                 let jh = tokio::spawn(async move {
                     let result = iface.lock().await
-                        .multisig_create_next(peer_strings, thresh, &wallet_id)
+                        .multisig_create_next(peer_strings, thresh, &wallet_id, true, 2)
                         .await;
                     let response = result.and_then(|r| r.multisig_info_string().ok_msg("No multisig info string"))
                         .map(|x| MoneroWalletResponse::PeerCreate(x));
