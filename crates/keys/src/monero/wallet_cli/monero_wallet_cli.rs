@@ -1,6 +1,7 @@
 use std::env;
-use std::env::current_dir;
+use std::env::{current_dir, home_dir};
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::ptr::write;
 use std::sync::Arc;
@@ -16,12 +17,15 @@ use crate::util::mnemonic_support::MnemonicSupport;
 use std::time::Duration;
 use itertools::Itertools;
 use log::info;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use redgold_common::flume_send_help::SendErrorInfo;
+use redgold_common_no_wasm::readers_writers::FileUtils;
 use redgold_schema::errors::into_error::ToErrorInfo;
 use redgold_schema::helpers::easy_json::EasyJson;
+use redgold_common_no_wasm::retry;
 
 pub struct MoneroWalletCli where Self: Send + 'static {
     reader_r: flume::Receiver<String>,
@@ -33,15 +37,26 @@ pub struct MoneroWalletCli where Self: Send + 'static {
     pub timeout: Duration,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct WalletDiskFiles{
+    pub wallet_name: String,
+    pub on_disk_path: String,
+    pub wallet_bytes: Vec<u8>,
+    pub keys_bytes: Vec<u8>,
+}
+
 
 impl MoneroWalletCli {
 
 
     fn from_pty(
-        master: Box<dyn portable_pty::MasterPty + Send>,
-        child: Box<dyn portable_pty::Child + Send>,
+        cmd: CommandBuilder,
         addr: String,
     ) -> RgResult<Self> {
+        let pair = Self::open_pty()?;
+        let master = pair.master;
+        let _child = pair.slave.spawn_command(cmd)
+            .map_err(|e| "failed to spawn pty".to_error_info().enhance(e.to_string()))?;
 
         let reader = master.try_clone_reader()
             .map_err(|e| "failed to open clone reader pty".to_error_info().enhance(e.to_string()))?;
@@ -101,6 +116,19 @@ impl MoneroWalletCli {
         )
     }
 
+    pub async fn get_wallet_files(wallet_name: impl Into<String>, full_path: impl Into<String>) -> RgResult<WalletDiskFiles> {
+        let name = wallet_name.into();
+        let path = full_path.into();
+        let pb = PathBuf::from(&path);
+        let pb_keys = pb.with_extension("keys");
+        Ok(WalletDiskFiles {
+            wallet_name: name.clone(),
+            on_disk_path: path.clone(),
+            wallet_bytes: path.read_bytes().await?,
+            keys_bytes: pb_keys.read_bytes().await?,
+        })
+    }
+
     pub fn time(&mut self, t: u64) {
         self.timeout = Duration::from_secs(t);
     }
@@ -134,60 +162,60 @@ impl MoneroWalletCli {
         Ok(output)
     }
 
-    pub async fn restore_from_spend(
+    pub async fn restore_from_spend_precursor(
+        wallet_path: impl Into<String>,
+        restore_height: Option<i64>,
+        daemon_address: impl Into<String>,
+        allow_delete_old: bool,
+    ) -> RgResult<Self> {
+        let addr = daemon_address.into();
+
+        // println!("Height: {}", height);
+        let wallet_path = wallet_path.into();
+        if allow_delete_old {
+            println!("Deleting old wallet files in {}", wallet_path.clone());
+            let mut pb = PathBuf::from(&wallet_path);
+            let mut pb2 = pb.clone();
+            let pb_keys = pb2.with_extension("keys");
+            println!("Deleting wallet files: {} and {}", pb.display(), pb_keys.display());
+            pb.delete_file().await?;
+            pb_keys.delete_file().await?;
+        }
+
+        let height = match restore_height {
+            Some(h) => h,
+            // Cannot do current height or it hits a monero built-in error
+            None => get_daemon_height(addr.clone()).await? - 20,
+        };
+
+        let mut cmd = Self::command_base(&addr)?;
+
+        cmd.arg("--restore-height");
+        cmd.arg(height.to_string());
+
+        cmd.arg("--generate-from-keys");
+        cmd.arg(wallet_path.clone());
+        let cli = Self::from_pty(cmd, addr)?;
+        Ok(cli)
+    }
+
+
+    pub async fn restore_from_spend_full(
         words: WordsPass,
         wallet_path: impl Into<String>,
         restore_height: Option<i64>,
         daemon_address: impl Into<String>,
         allow_delete_old: bool,
-    ) -> RgResult<(Self, String)> {
-        let addr = daemon_address.into();
-        let height = match restore_height {
-            Some(h) => h,
-            // Cannot do current height or it hits a monero built-in error
-            None => get_daemon_height(addr.clone()).await? - 10,
-        };
-        println!("Height: {}", height);
-        let wallet_path = wallet_path.into();
-        if allow_delete_old {
-            std::fs::remove_file(format!("{}.keys", wallet_path.clone())).ok();
-            std::fs::remove_file(format!("{}", wallet_path.clone())).ok();
-        }
+    ) -> RgResult<Self> {
+
+
         let kp = words.derive_monero_keys()?;
         let sp = kp.spend.to_string();
         let sv = kp.view.to_string();
         let address = words.monero_external_address(&NetworkEnvironment::Main)?;
         let addr_str = address.render_string()?;
 
-        let pty_system = native_pty_system();
-        let pair = pty_system.openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        }).map_err(|e| "failed to open pty".to_error_info().enhance(e.to_string()))?;
-
-
-        // Get current working directory and set it for the child process
-        let current_dir = env::current_dir()
-            .map_err(|e| "failed to get current directory".to_error_info().enhance(e.to_string()))?;
-        println!("Current directory: {:?}", current_dir.clone());
-
-        let mut cmd = CommandBuilder::new("monero-wallet-cli");
-        cmd.cwd(current_dir);
-        cmd.arg("--daemon-address");
-        cmd.arg(addr.clone());
-        cmd.arg("--trusted-daemon");
-        cmd.arg("--restore-height");
-        cmd.arg(height.to_string());
-        cmd.arg("--generate-from-keys");
-        cmd.arg(wallet_path.clone());
-
-        let child = pair.slave.spawn_command(cmd)
-            .map_err(|e| "failed to spawn pty".to_error_info().enhance(e.to_string()))?;
-        let mut cli = Self::from_pty(pair.master, child, addr)?;
-
-        println!("Waiting for wallet cli to start");
+        let mut cli = Self::restore_from_spend_precursor(wallet_path, restore_height, daemon_address, allow_delete_old).await?;
         cli.try_read_expect("Standard address:").await?;
         cli.write(addr_str).await?;
         cli.try_read_expect("Secret spend key:").await?;
@@ -212,10 +240,6 @@ impl MoneroWalletCli {
         tokio::time::sleep(Duration::from_secs(2)).await;
         cli.time(2);
         cli.expect_wallet().await?;
-        cli.write("set enable-multisig-experimental 1").await?;
-        cli.try_read_expect("Wallet password:").await?;
-        cli.write("").await?;
-        cli.expect_wallet().await?;
         tokio::time::sleep(Duration::from_secs(1)).await;
         cli.write("set ask-password 0").await?;
         cli.try_read_expect("Wallet password:").await?;
@@ -226,25 +250,32 @@ impl MoneroWalletCli {
         cli.write("").await?;
         cli.expect_wallet().await?;
         tokio::time::sleep(Duration::from_secs(1)).await;
+        Ok(cli)
+    }
+
+
+    pub async fn restore_from_spend_prepare_multisig(
+        words: WordsPass,
+        wallet_path: impl Into<String>,
+        restore_height: Option<i64>,
+        daemon_address: impl Into<String>,
+        allow_delete_old: bool,
+    ) -> RgResult<(Self, String)> {
+
+        let mut cli = Self::restore_from_spend_full(words, wallet_path, restore_height, daemon_address, allow_delete_old).await?;
+
+        cli.write("set enable-multisig-experimental 1").await?;
+        cli.try_read_expect("Wallet password:").await?;
+        cli.write("").await?;
+        cli.expect_wallet().await?;
+
+
         cli.write("set").await?;
         cli.time(10);
         cli.try_read_expect("enable-multisig-experimental = 1").await?;
         cli.time(2);
-        let mut i = 0;
-        loop {
-            i += 1;
-            if cli.out_of_sync().await? {
-                println!("Out of sync, waiting");
-            } else {
-                break;
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            if i > 2 {
-                break;
-            }
-        }
-        println!("Synced");
-        cli.time(4);
+        // cli.wait_sync().await?;
+        cli.time(6);
         cli.write("prepare_multisig").await?;
         let out = cli.try_read_expect(
             "This includes the PRIVATE view key, so needs to be disclosed only to that multisig wallet's participants")
@@ -259,11 +290,52 @@ impl MoneroWalletCli {
          */
         cli.time(2);
         let multisig_prepared = Self::split_extract_multisig(out)?;
-
+        // Self::wait_sync(&mut cli).await?;
         Ok((cli, multisig_prepared))
     }
 
-    fn split_extract_multisig(out: String) -> Result<String, ErrorInfo> {
+    pub fn command_base(addr: &String) -> RgResult<CommandBuilder> {
+        // Get current working directory and set it for the child process
+        let current_dir = env::current_dir()
+            .map_err(|e| "failed to get current directory".to_error_info().enhance(e.to_string()))?;
+        println!("Current dir: {:?}", current_dir);
+        let mut cmd = CommandBuilder::new("monero-wallet-cli");
+        cmd.cwd(current_dir);
+        cmd.arg("--daemon-address");
+        cmd.arg(addr.clone());
+        cmd.arg("--trusted-daemon");
+        Ok(cmd)
+    }
+
+    pub fn open_pty() -> Result<PtyPair, ErrorInfo> {
+        let pty_system = native_pty_system();
+        let pair = pty_system.openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        }).map_err(|e| "failed to open pty".to_error_info().enhance(e.to_string()))?;
+        Ok(pair)
+    }
+
+    pub async fn wait_sync(&mut self) -> Result<(), ErrorInfo> {
+        let mut i = 0;
+        let instant = tokio::time::Instant::now();
+        loop {
+            i += 1;
+            if self.out_of_sync().await? {
+                let elapsed = instant.elapsed().as_secs();
+                println!("Out of sync, waiting {i}: {elapsed} seconds");
+            } else {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        println!("Synced");
+        Ok(())
+    }
+
+    pub fn split_extract_multisig(out: String) -> Result<String, ErrorInfo> {
         let vec = out.split("Multisig").collect::<Vec<&str>>();
         let vec = vec.get(1).ok_msg("Missing multisig info")?.clone();
         let vec = vec.split("Send").collect::<Vec<&str>>();
@@ -291,6 +363,7 @@ impl MoneroWalletCli {
         self.time(6);
         let out = self.try_read().await?;
         let ms = Self::split_extract_multisig(out)?;
+        // self.wait_sync().await?;
         Ok(ms)
     }
 
@@ -318,14 +391,9 @@ Multisig address: 56MD1L4zky3bFXDQb9qvSx7PDbg8F4x1HgPrFNrDnGnYDqFZcWGswWc1p2moFa
             let split = all.split("Multisig address: ").collect_vec();
             split.get(1).ok_msg("Missing multisig address")?.trim().replace("\n", "").to_string()
         };
+        // self.wait_sync().await?;
 
         Ok((result, more_rounds))
-    }
-
-    pub fn regex(pat: impl Into<String>, out: String) -> RgResult<String> {
-        Regex::new(pat.into().as_str())
-            .unwrap().find(out.as_str()).map(|m| m.as_str().trim().to_string())
-            .ok_msg("Missing multisig info")
     }
 
 
@@ -333,9 +401,6 @@ Multisig address: 56MD1L4zky3bFXDQb9qvSx7PDbg8F4x1HgPrFNrDnGnYDqFZcWGswWc1p2moFa
         self.try_read_expect("[wallet").await
     }
 
-    pub async fn height(&self) -> RgResult<i64> {
-        get_daemon_height(self.daemon_address.clone()).await
-    }
 
 }
 
@@ -360,51 +425,81 @@ pub async fn get_daemon_height(url: impl Into<String>) -> RgResult<i64> {
     Ok(height as i64)
 }
 
+pub async fn get_daemon_height_retry(url: impl AsRef<str>) -> RgResult<i64> {
+    retry!(get_daemon_height(url.as_ref()))
+}
+
+
 pub async fn test_wallet(words: WordsPass, id: usize) -> tokio::task::JoinHandle<RgResult<(MoneroWalletCli, String)>> {
     let addr = "http://server:18089";
+    let height = get_daemon_height_retry(addr).await.unwrap() - 20;
     tokio::spawn(async move {
-        MoneroWalletCli::restore_from_spend(
-            words, format!("test_wallet_{}", id), None, addr, true
+        let home = home_dir().unwrap();
+        let wallet_path = home.join(format!("test_wallet_{}", id));
+        MoneroWalletCli::restore_from_spend_prepare_multisig(
+            words, wallet_path.to_str().unwrap().to_string(), Some(height), addr, true
         ).await
     })
 }
+
 #[tokio::test]
 async fn test_new_wallet() {
     if std::env::var("REDGOLD_DEBUG_DEVELOPER").is_err() {
         return;
     }
 
+
     let ci1 = TestConstants::test_words_pass().unwrap();
-    let ci2 = ci1.hash_derive_words("1").unwrap();
-    let ci3 = ci1.hash_derive_words("2").unwrap();
+    let mut words = vec![ci1.clone()];
+    for i in 1..5 {
+        let ci = ci1.hash_derive_words(&i.to_string()).unwrap();
+        words.push(ci);
+    }
+    println!("Num peers: {}", words.len());
 
-    let addr = "http://server:18089";
-    // let height = get_daemon_height(addr).await.unwrap();
-    // println!("Height: {}", height);
-    let j1 = test_wallet(ci1, 1).await;
-    let j2 = test_wallet(ci2, 2).await;
-    let j3 = test_wallet(ci3, 3).await;
+    let mut jhs = vec![];
+    for (i, w) in words.iter().enumerate() {
+        let j1 = test_wallet(w.clone(), i).await;
+        jhs.push(j1);
+    };
 
-    let (mut c1, p1) = j1.await.unwrap().unwrap();
-    let (mut c2, p2) = j2.await.unwrap().unwrap();
-    let (mut c3, p3) = j3.await.unwrap().unwrap();
+    let mut prepared = vec![];
+    for j in jhs {
+        let (c, p) = j.await.unwrap().unwrap();
+        prepared.push((c, p));
+    }
 
-    let mut m1 = c1.make_multisig(2, vec![p2.clone(), p3.clone()]).await.unwrap();
-    let mut m2 = c2.make_multisig(2, vec![p1.clone(), p3.clone()]).await.unwrap();
-    let mut m3 = c3.make_multisig(2, vec![p1.clone(), p2.clone()]).await.unwrap();
-    let mut more_rounds = true;
+    let mut made = vec![];
+
+    for (mut c, p) in prepared {
+        let m = c.make_multisig(3, vec![]).await.unwrap();
+        made.push((c, m));
+    }
+
+    let mut peer_strings = made.iter().map(|x| x.1.clone()).collect::<Vec<String>>();
 
     loop {
-        (m1, more_rounds) = c1.exchange_multisig_keys(vec![m2.clone(), m3.clone()]).await.unwrap();
-        (m2, _) = c2.exchange_multisig_keys(vec![m1.clone(), m3.clone()]).await.unwrap();
-        (m3, _) = c3.exchange_multisig_keys(vec![m1.clone(), m2.clone()]).await.unwrap();
+        let these_peer_strings = peer_strings.clone();
+        let mut next_peer_strings = vec![];
+        let mut more_rounds = false;
+        for (idx, (ref mut c, _)) in made.iter_mut().enumerate() {
+            let these = these_peer_strings.iter().enumerate()
+                .filter(|(i, _)| *i != idx).map(|(_, x)| { x.clone()
+            }).collect::<Vec<String>>();
+            let (peer, more) = c.exchange_multisig_keys(these.clone()).await.unwrap();
+            more_rounds = more;
+            next_peer_strings.push(peer);
+        }
+        peer_strings = next_peer_strings;
         if !more_rounds {
             break
         }
     }
 
-    // println!("m1: {}", m1);
-    // println!("m2: {}", m2);
-    // println!("m3: {}", m3);
+    println!("Peer strings: {:?}", peer_strings);
+    assert_eq!(peer_strings.iter().unique().count(), 1);
+    let addr = peer_strings.get(0).unwrap();
+
+    println!("Final address {}", addr);
 
 }

@@ -77,6 +77,7 @@ regex = "1.10.6"
 
 redgold-safe-bindings = { workspace = true}
 flume = {workspace = true}
+#async-trait = "0.1.85"
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 sequoia-openpgp = { version = "1.21.2" }

@@ -4,6 +4,6 @@ pub mod rpc_core;
 pub mod rpc_multisig;
 pub mod node_wrapper;
 mod monero_multisig_e2e_testing;
-mod monero_wallet_cli;
+pub mod wallet_cli;
 // monero faucet
 // https://community.rino.io/faucet/testnet/
