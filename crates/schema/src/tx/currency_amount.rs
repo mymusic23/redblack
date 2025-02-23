@@ -49,8 +49,8 @@ impl CurrencyAmount {
     }
     pub fn from_fractional_basis(a: impl Into<f64>, basis: i64) -> Result<Self, ErrorInfo> {
         let a = a.into();
-        if a <= 0f64 {
-            Err(ErrorInfo::error_info("Invalid negative or zero transaction amount"))?
+        if a < 0f64 {
+            Err(ErrorInfo::error_info("Invalid negative transaction amount"))?
         }
         let amount = (a * (basis as f64)) as i64;
         let mut a = CurrencyAmount::default();

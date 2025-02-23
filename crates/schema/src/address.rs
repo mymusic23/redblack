@@ -148,8 +148,9 @@ impl Address {
         }
     }
 
-    pub fn from_monero_external(address: &String) -> Address {
-        let mut ret = Self::from_monero(address);
+    pub fn from_monero_external(address: impl AsRef<str>) -> Address {
+        let address = address.as_ref().to_string();
+        let mut ret = Self::from_monero(&address);
         ret.currency = SupportedCurrency::Monero as i32;
         ret
     }
