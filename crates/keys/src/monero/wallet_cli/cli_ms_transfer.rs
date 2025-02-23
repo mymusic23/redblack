@@ -88,7 +88,7 @@ async fn test_multisig_transfer() {
 
     let ci1 = TestConstants::test_words_pass().unwrap();
     let mut words = vec![ci1.clone()];
-    for i in 1..5 {
+    for i in 1..3 {
         let ci = ci1.hash_derive_words(&i.to_string()).unwrap();
         words.push(ci);
     }
@@ -97,7 +97,7 @@ async fn test_multisig_transfer() {
     // Open all five multisig wallets
     let mut clis = Vec::new();
     for (i, _) in words.iter().enumerate() {
-        let path = home_dir().unwrap().join(format!("test_wallet_{}", i));
+        let path = home_dir().unwrap().join(format!("test_wallet_2of3_{}", i));
         let cli = MoneroWalletCli::open_existing_wallet(
             addr,
             path.to_str().unwrap(),
@@ -148,8 +148,8 @@ async fn test_multisig_transfer() {
 
     // Get signatures from first three wallets (3-of-5 required)
     let mut current_txset = unsigned_txset;
-    for i in 0..3 {
-        let signed_txset = clis[i].sign_multisig(&current_txset).await.unwrap();
+    for i in 0..2 {
+        let signed_txset = clis[i + 1].sign_multisig(&current_txset).await.unwrap();
         println!("Wallet {} signed transaction set: {}", i + 1, signed_txset);
         current_txset = signed_txset;  // Use this signed txset for the next signer
     }

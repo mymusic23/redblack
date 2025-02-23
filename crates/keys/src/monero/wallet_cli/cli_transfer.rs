@@ -125,10 +125,13 @@ async fn test_single_transfer() {
     println!("Balance: {:?}", balance);
     
     let dest = Address::from_monero_external(
-        "42L1eRLEoFmXRgjW4x7rTJNwTYNgZ5G9TiQ1XGqXtzDZ2MMT15PbCffh6sgRAkYEnpCuCPu4UKH9mdLmajQwus8KHhQKkDm"
+        // 3 of 5 multisig
+        // "42L1eRLEoFmXRgjW4x7rTJNwTYNgZ5G9TiQ1XGqXtzDZ2MMT15PbCffh6sgRAkYEnpCuCPu4UKH9mdLmajQwus8KHhQKkDm"
+        "4AkhWUvZrTtXZU28RXBYnG2Umu6wLKfGC5CfoCsdZZSNPDVaahqM9W1UzgGqj3hh8jbQ9Uii7pZmbWzLDwCLWJtYSjfrvgx"
+        // 2 of 3 multisig
     );
 
-    let amount = CurrencyAmount::from_fractional_cur(0.001, SupportedCurrency::Monero).unwrap();
+    let amount = CurrencyAmount::from_fractional_cur(0.005, SupportedCurrency::Monero).unwrap();
     let message = Uuid::new_v4().to_string();
     
     // Test the new transfer_and_return_proof function

@@ -115,9 +115,9 @@ async fn test_new_wallet() {
         return;
     }
 
-    let threshold = 4;
-    let total_num_wallets = 8;
-    let pfx = "test_wallet_4of8";
+    let threshold = 2;
+    let total_num_wallets = 3;
+    let pfx = "test_wallet_2of3";
 
     let ci1 = TestConstants::test_words_pass().unwrap();
     let mut words = vec![ci1.clone()];

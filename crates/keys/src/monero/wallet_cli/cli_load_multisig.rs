@@ -19,7 +19,7 @@ async fn test_load_ms_wallet() {
     let mut words = vec![ci1.clone()];
     let addr = "http://server:18089";
 
-    let path = home_dir().unwrap().join("test_wallet_0");
+    let path = home_dir().unwrap().join("test_wallet_2of3_0");
 
     let cli = MoneroWalletCli::open_existing_wallet(
         addr,
