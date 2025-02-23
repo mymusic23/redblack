@@ -19,16 +19,20 @@ async fn test_load_ms_wallet() {
     let mut words = vec![ci1.clone()];
     let addr = "http://server:18089";
 
-    let path = home_dir().unwrap().join("test_wallet_1");
+    let path = home_dir().unwrap().join("test_wallet_0");
 
     let cli = MoneroWalletCli::open_existing_wallet(
         addr,
         path.to_str().unwrap(),
+        None::<String>
     ).await.unwrap();
 
-    cli.help_all().await.unwrap().print();
+    println!("Balance: {:?}", cli.balance().await.unwrap());
+    // 46AYBkASoYPENtzG1A6fpVQooVkxoXJokJuz1MZzMzVK4XfhULjDEVB8UGpfHhFpgXBkBbUeRdKEZJArLJqR3ZF3UNyJYFr
 
-    let addr = cli.address().await.unwrap();
-    println!("Address: {}", addr);
+    // cli.help_all().await.unwrap().print();
+
+    // let addr = cli.address().await.unwrap();
+    // println!("Address: {}", addr);
 
 }

@@ -24,7 +24,7 @@ impl MoneroWalletCli {
             Self::delete_wallet_files(wallet_path).await?;
         }
 
-        let mut cmd = Self::command_base(&daemon_address)?;
+        let mut cmd = Self::command_base(&daemon_address, None::<String>)?;
 
         cmd.arg("--restore-height");
         cmd.arg(restore_height.to_string());

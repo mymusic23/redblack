@@ -1,6 +1,6 @@
 [workspace.package]
 edition = "2021"
-version = "0.1.45"
+version = "0.1.46"
 authors = ["Redgold"]
 description = "Decentralized Portfolio Contracts & Data Lake"
 documentation = "https://dev.docs.redgold.io/"
@@ -65,25 +65,25 @@ description = "Crypto portfolio/ETF contract network"
 
 
 [workspace.dependencies]
-redgold-schema = { path = "crates/schema", version = "0.1.45" }
-redgold-data = { path = "crates/data", version = "0.1.45" }
-redgold-keys = { path = "crates/keys", version = "0.1.45" }
-redgold-executor = { path = "crates/executor", version = "0.1.45" }
-redgold-sdk-client = { path = "crates/sdk-client", version = "0.1.45" }
-redgold-rpc-integ = { path = "crates/rpc-integ" , version = "0.1.45" }
-redgold-daq = { path = "crates/daq" , version = "0.1.45" }
-redgold-node-core = { path = "crates/node-core" , version = "0.1.45" }
-redgold-ci = { path = "crates/ci" , version = "0.1.45" }
-redgold-crawler = { path = "crates/crawler" , version = "0.1.45" }
-redgold-crawler-native = { path = "crates/crawler-native" , version = "0.1.45" }
-redgold-gui = { path = "crates/gui" , version = "0.1.45" }
-redgold-common = { path = "crates/common" , version = "0.1.45" }
-redgold-common-no-wasm = { path = "crates/common-no-wasm" , version = "0.1.45" }
-redgold-fs = { path = "crates/fs" , version = "0.1.45" }
-redgold-ops = { path = "crates/ops" , version = "0.1.45" }
-redgold-safe-bindings = { path = "crates/safe-bindings" , version = "0.1.45" }
-redgold-thorchain = { path = "crates/thorchain" , version = "0.1.45" }
-redgold-cli = { path = "crates/cli" , version = "0.1.45" }
+redgold-schema = { path = "crates/schema", version = "0.1.46" }
+redgold-data = { path = "crates/data", version = "0.1.46" }
+redgold-keys = { path = "crates/keys", version = "0.1.46" }
+redgold-executor = { path = "crates/executor", version = "0.1.46" }
+redgold-sdk-client = { path = "crates/sdk-client", version = "0.1.46" }
+redgold-rpc-integ = { path = "crates/rpc-integ" , version = "0.1.46" }
+redgold-daq = { path = "crates/daq" , version = "0.1.46" }
+redgold-node-core = { path = "crates/node-core" , version = "0.1.46" }
+redgold-ci = { path = "crates/ci" , version = "0.1.46" }
+redgold-crawler = { path = "crates/crawler" , version = "0.1.46" }
+redgold-crawler-native = { path = "crates/crawler-native" , version = "0.1.46" }
+redgold-gui = { path = "crates/gui" , version = "0.1.46" }
+redgold-common = { path = "crates/common" , version = "0.1.46" }
+redgold-common-no-wasm = { path = "crates/common-no-wasm" , version = "0.1.46" }
+redgold-fs = { path = "crates/fs" , version = "0.1.46" }
+redgold-ops = { path = "crates/ops" , version = "0.1.46" }
+redgold-safe-bindings = { path = "crates/safe-bindings" , version = "0.1.46" }
+redgold-thorchain = { path = "crates/thorchain" , version = "0.1.46" }
+redgold-cli = { path = "crates/cli" , version = "0.1.46" }
 
 # Serialization
 serde = { version = "1.0.130", features = ["default", "derive"] }

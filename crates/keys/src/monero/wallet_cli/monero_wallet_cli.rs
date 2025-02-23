@@ -23,17 +23,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 use redgold_common::flume_send_help::SendErrorInfo;
-use redgold_common_no_wasm::readers_writers::FileUtils;
+use redgold_common_no_wasm::readers_writers::{AsPath, FileUtils};
 use redgold_schema::errors::into_error::ToErrorInfo;
 use redgold_schema::helpers::easy_json::EasyJson;
 use redgold_common_no_wasm::retry;
 use redgold_schema::observability::errors::EnhanceErrorInfo;
 
+#[derive(Clone)]
 pub struct MoneroWalletCli where Self: Send + 'static {
     reader_r: flume::Receiver<String>,
     writer_s: flume::Sender<String>,
-    jh_reader: JoinHandle<()>,
-    jh_writer: JoinHandle<()>,
+    jh_reader: Arc<JoinHandle<()>>,
+    jh_writer: Arc<JoinHandle<()>>,
     // pub child: Arc<Box<dyn portable_pty::Child + Send>>,
     pub daemon_address: String,
     pub timeout: Duration,
@@ -50,15 +51,66 @@ pub struct WalletDiskFiles{
 
 impl MoneroWalletCli {
 
+    /*
+    [wallet 46AYBk]: get_tx_proof
+    003f349023d583ff2d84c88d37fbbb799c2c729b60b763a21829bb665bbdfc70
+    46AYBkASoYPENtzG1A6fpVQooVkxoXJokJuz1MZzMzVK4XfhULjDEVB8UGpfHhFpgXBkBbUeRdKEZJArLJqR3ZF3UNyJYFr
+    test
+signature file saved to: monero_tx_proof
+     */
+    pub async fn get_tx_proof(
+        &self,
+        txid: impl AsRef<str>,
+        address: impl AsRef<str>,
+        message: Option<impl AsRef<str>>
+    ) -> RgResult<String> {
+        let message = message
+            .map(|x| format!(" {}", x.as_ref()))
+            .unwrap_or("".to_string());
+        self.write(format!("get_tx_proof {} {}{}", txid.as_ref(), address.as_ref(), message)).await?;
+        self.try_read_expect("signature file saved to: monero_tx_proof").await?;
+        let out = "monero_tx_proof".read_string().await?;
+        Ok(out)
+    }
+    /**
+        * Error: usage: check_tx_proof <txid> <address> <signature_file> [<message>]
+    check_tx_proof 003f349023d583ff2d84c88d37fbbb799c2c729b60b763a21829bb665bbdfc70
+    46AYBkASoYPENtzG1A6fpVQooVkxoXJokJuz1MZzMzVK4XfhULjDEVB8UGpfHhFpgXBkBbUeRdKEZJArLJqR3ZF3UNyJYFr monero_tx_proof test
+    Good signature
+    46AYBkASoYPENtzG1A6fpVQooVkxoXJokJuz1MZzMzVK4XfhULjDEVB8UGpfHhFpgXBkBbUeRdKEZJArLJqR3ZF3UNyJYFr received 0.194863520000 in txid <003f349023d583ff2d84c88d37fbbb799c2c729b60b763a21829bb665bbdfc70>
+    This transaction has 1363 confirmations
+        */
+    pub async fn check_tx_proof(
+        &self,
+        txid: impl AsRef<str>,
+        address: impl AsRef<str>,
+        message: Option<impl AsRef<str>>,
+        proof: impl AsRef<str>,
+    ) -> RgResult<bool> {
+        let message = message
+            .map(|x| format!(" {}", x.as_ref()))
+            .unwrap_or("".to_string());
+        let tmp_output = Uuid::new_v4().to_string();
+        tmp_output.write_string(proof.as_ref()).await?;
+        let _cleanup = redgold_common_no_wasm::cleanup::Cleanup(tmp_output.clone());
+
+        self.write(format!(
+            "check_tx_proof {} {} {}{}",
+            txid.as_ref(), address.as_ref(), tmp_output, message)).await?;
+        let res = self.try_read().await?;
+        Ok(res.contains("Good signature"))
+    }
+
     pub async fn get_tx_key(&self, txid: impl AsRef<str>) -> RgResult<String> {
         self.write(format!("get_tx_key {}", txid.as_ref())).await?;
         self.try_read().await
     }
-    pub async fn open_existing_wallet(
+    pub async fn open_existing_wallet<P: AsRef<Path>>(
         daemon_address: impl AsRef<str>,
-        path: impl AsRef<str>
+        path: impl AsRef<str>,
+        working_dir: Option<P>
     ) -> RgResult<MoneroWalletCli> {
-        let mut cmd = Self::command_base(daemon_address.as_ref())?;
+        let mut cmd = Self::command_base(daemon_address.as_ref(), working_dir)?;
         cmd.arg("--wallet-file");
         cmd.arg(path.as_ref());
         let mut cli = Self::from_pty(cmd, daemon_address)?;
@@ -86,9 +138,14 @@ impl MoneroWalletCli {
         self.try_read().await
     }
 
-    pub async fn balance(&self) -> RgResult<String> {
+    pub async fn balance(&self) -> RgResult<Balance> {
         self.write("balance").await?;
-        self.try_read().await
+        let out = self.try_read().await?;
+        // Split the output into lines and find the balance line
+        let balance_line = out.lines()
+            .find(|line| line.contains("Balance:") && line.contains("unlocked balance:"))
+            .ok_msg("No balance line found")?;
+        parse_balance(balance_line)
     }
 
     pub(crate) fn from_pty(
@@ -149,8 +206,8 @@ impl MoneroWalletCli {
             Self {
                 reader_r,
                 writer_s,
-                jh_reader,
-                jh_writer,
+                jh_reader: Arc::new(jh_reader),
+                jh_writer: Arc::new(jh_writer),
                 // child: Arc::new(child),
                 daemon_address: addr.as_ref().to_string(),
                 timeout: Duration::from_secs(2),
@@ -236,7 +293,7 @@ impl MoneroWalletCli {
             None => get_daemon_height(addr.clone()).await? - 20,
         };
 
-        let mut cmd = Self::command_base(&addr)?;
+        let mut cmd = Self::command_base(&addr, None::<String>)?;
 
         cmd.arg("--restore-height");
         cmd.arg(height.to_string());
@@ -310,15 +367,18 @@ impl MoneroWalletCli {
     }
 
 
-    pub fn command_base(addr: impl AsRef<str>) -> RgResult<CommandBuilder> {
+    pub fn command_base(addr: impl AsRef<str>, working_dir: Option<impl AsRef<Path>>) -> RgResult<CommandBuilder> {
         // Get current working directory and set it for the child process
-        let current_dir = env::current_dir()
+        let current_dir = current_dir()
             .map_err(|e| "failed to get current directory".to_error_info().enhance(e.to_string()))?;
-        println!("Current dir: {:?}", current_dir);
+        let dir = working_dir
+            .map(|x| x.as_ref().to_path_buf())
+            .unwrap_or(current_dir);
+        println!("Current dir: {:?}", dir.clone());
         let string = addr.as_ref().to_string();
 
         let mut cmd = CommandBuilder::new("monero-wallet-cli");
-        cmd.cwd(current_dir);
+        cmd.cwd(dir);
         if !string.is_empty() {
             cmd.arg("--daemon-address");
             cmd.arg(string);
@@ -372,7 +432,7 @@ impl MoneroWalletCli {
     pub async fn out_of_sync(&self) -> RgResult<bool> {
         self.write("status").await?;
         let out = self.try_read_expect("[wallet").await?;
-        Ok(out.contains("out of sync"))
+        Ok(out.contains("out of sync") || out.contains("no daemon"))
     }
 
     pub async fn expect_wallet(&self) -> RgResult<String> {
@@ -408,3 +468,89 @@ pub async fn get_daemon_height_retry(url: impl AsRef<str>) -> RgResult<i64> {
     retry!(get_daemon_height(url.as_ref()))
 }
 
+
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+pub struct Balance {
+    pub total: f64,
+    pub unlocked: f64,
+    pub blocks_to_unlock: Option<u64>,
+}
+
+pub fn parse_balance(input: &str) -> Result<Balance, ErrorInfo> {
+    println!("Parsing balance from input: {}", input);
+    
+    // Extract the line containing balance information
+    let balance_line = input.lines()
+        .find(|line| line.contains("Balance:"))
+        .ok_msg("No balance information found")?;
+
+    // Use regex to extract the numbers more reliably
+    let re = Regex::new(r"Balance: (\d+\.\d+)(?:, unlocked balance: (\d+\.\d+))?(?:\s*\((\d+) block\(s\) to unlock\))?")
+        .map_err(|e| format!("Failed to create regex: {}", e).to_error_info())?;
+    
+    let caps = re.captures(balance_line)
+        .ok_msg("Failed to parse balance format")?;
+    
+    let total = caps.get(1)
+        .ok_msg("Missing total balance")?
+        .as_str()
+        .parse::<f64>()
+        .map_err(|e| format!("Failed to parse total balance: {}", e).to_error_info())?;
+    
+    let unlocked = caps.get(2)
+        .map(|m| m.as_str().parse::<f64>())
+        .unwrap_or(Ok(total))
+        .map_err(|e| format!("Failed to parse unlocked balance: {}", e).to_error_info())?;
+    
+    let blocks_to_unlock = caps.get(3)
+        .map(|m| m.as_str().parse::<u64>())
+        .transpose()
+        .map_err(|e| format!("Failed to parse blocks to unlock: {}", e).to_error_info())?;
+
+    Ok(Balance {
+        total,
+        unlocked,
+        blocks_to_unlock,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_balance() {
+        let input = "Balance: 0.188802100000, unlocked balance: 0.000000000000 (9 block(s) to unlock)";
+        let balance = parse_balance(input).unwrap();
+        assert_eq!(balance.total, 0.188802100000);
+        assert_eq!(balance.unlocked, 0.000000000000);
+        assert_eq!(balance.blocks_to_unlock, Some(9));
+    }
+
+    #[test]
+    fn test_parse_balance_no_blocks() {
+        let input = "Balance: 0.188802100000, unlocked balance: 0.188802100000";
+        let balance = parse_balance(input).unwrap();
+        assert_eq!(balance.total, 0.188802100000);
+        assert_eq!(balance.unlocked, 0.188802100000);
+        assert_eq!(balance.blocks_to_unlock, None);
+    }
+
+    #[test]
+    fn test_parse_balance_with_wallet_prompt() {
+        let input = "Balance: 0.188802100000, unlocked balance: 0.188802100000\nResult: [wallet 46AYBk]:";
+        let balance = parse_balance(input).unwrap();
+        assert_eq!(balance.total, 0.188802100000);
+        assert_eq!(balance.unlocked, 0.188802100000);
+        assert_eq!(balance.blocks_to_unlock, None);
+    }
+
+    #[test]
+    fn test_parse_balance_simple() {
+        let input = "Balance: 0.188802100000";
+        let balance = parse_balance(input).unwrap();
+        assert_eq!(balance.total, 0.188802100000);
+        assert_eq!(balance.unlocked, 0.188802100000);
+        assert_eq!(balance.blocks_to_unlock, None);
+    }
+}

@@ -64,3 +64,8 @@ bdk_sled_test
 npm-hook/thor/CHANGELOG.md
 CHANGELOG.md
 .git/
+monero_tx_proof
+monero-wallet-cli.log*
+multisig_info_*
+test_wallet_*
+test_file.csv
