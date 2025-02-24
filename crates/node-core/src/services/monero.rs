@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::format;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +23,7 @@ use redgold_schema::structs::{Address, AddressDescriptor, ErrorInfo, MoneroMulti
 use redgold_schema::util::times::current_time_millis;
 use tokio::time::Instant;
 use redgold_common_no_wasm::readers_writers::FileUtils;
+use redgold_data::data_store::DataStore;
 use redgold_keys::monero::wallet_cli::cli_tx_history::MoneroCliHistoryTransaction;
 use redgold_schema::keys::words_pass::WordsPass;
 use redgold_schema::message::Request;
@@ -30,7 +32,7 @@ use crate::services::monero::MoneroWalletMessageType::Formation;
 use crate::services::monero::MoneroWalletResponse::PeerCreate;
 use crate::services::monero_group::{LiveWallet, WalletThread};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MultisigStage {
     // Creation of the multisig wallet
     Creating,
@@ -57,6 +59,7 @@ pub struct MoneroWalletSyncWriter<B: PeerBroadcast + 'static> {
     pub base_wallet_working_directory: PathBuf,
     pub daemon_address: String,
     pub words: WordsPass,
+    data_store: DataStore
 }
 
 
@@ -124,6 +127,12 @@ pub struct MoneroInstanceSecretData {
     pub raw_monero_output_address: String,
 }
 
+impl MoneroInstanceSecretData {
+    pub fn key(&self) -> String {
+        format!("{}-{}", MULTISIG_WALLET_FILENAME, self.wallet_group_key_str)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MoneroTransactionInfo {
     pub tx: Vec<MoneroCliHistoryTransaction>,
@@ -142,7 +151,7 @@ pub trait MoneroWalletSender {
     async fn send(&self, message: MoneroWalletMessage) -> RgResult<()>;
 }
 
-pub(crate) const MULTISIG_WALLET_FILENAME: &str = "multisig_wallet";
+pub const MULTISIG_WALLET_FILENAME: &str = "monero_multisig_wallet";
 
 impl<T> MoneroWalletSyncWriter<T> where T: PeerBroadcast
 {
@@ -184,14 +193,26 @@ impl<T> MoneroWalletSyncWriter<T> where T: PeerBroadcast
         base_wallet_working_directory: PathBuf,
         daemon_address: String,
         words: WordsPass,
-        secret_data: Vec<MoneroInstanceSecretData>
-    ) -> Self {
+        data_store: DataStore
+    ) -> RgResult<Self> {
+
+        let mut secret_data: Vec<MoneroInstanceSecretData> = vec![];
+        for k in data_store.config_store.select_all_key_names().await? {
+            if k.starts_with(MULTISIG_WALLET_FILENAME) {
+                let res = data_store.config_store.get_json(&k).await?;
+                if let Some(res) = res {
+                    secret_data.push(res);
+                }
+            }
+        }
+
         let mut writer = Self {
             sync_handlers: Default::default(),
             peer_broadcast,
             base_wallet_working_directory,
             daemon_address,
             words,
+            data_store,
         };
 
         for data in secret_data {
@@ -223,7 +244,7 @@ impl<T> MoneroWalletSyncWriter<T> where T: PeerBroadcast
                     sender: s
                 });
         }
-        writer
+        Ok(writer)
     }
 
     pub fn new_thread(&self) -> WalletThread<T> {
@@ -234,6 +255,7 @@ impl<T> MoneroWalletSyncWriter<T> where T: PeerBroadcast
             peer_broadcast: self.peer_broadcast.clone(),
             live_wallet: "CLI not started".to_error(),
             is_restore: false,
+            data_store: self.data_store.clone(),
         }
     }
 }

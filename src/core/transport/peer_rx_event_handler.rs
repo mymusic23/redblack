@@ -47,6 +47,9 @@ use tokio::task::JoinHandle;
 // use libp2p::{Multiaddr, PeerId};
 // use libp2p::request_response::ResponseChannel;
 use tracing::{debug, error, info, trace};
+use redgold_node_core::services::monero::{MoneroSyncInteraction, MoneroWalletMessage, MoneroWalletMessageType, MoneroWalletResponse};
+use redgold_schema::errors::into_error::ToErrorInfo;
+use redgold_schema::util::times::current_time_millis;
 
 #[derive(Clone)]
 pub struct PeerRxEventHandler<E> where E: ExternalNetworkResources + Send {
@@ -138,7 +141,7 @@ impl<E> PeerRxEventHandler<E> where E: ExternalNetworkResources + Send + 'static
             let npk_hex = npk.hex();
             let labels = [("public_key".to_string(), npk_hex)];
             counter!("redgold_request_response_pk", &labels).increment(1);
-            if !relay.is_seed(npk).await {
+            if !relay.is_seed(npk) {
                 if let Some(nmd) = request.node_metadata.as_ref() {
                     let opt_reward = relay.ds.peer_store.query_nodes_peer_node_info(&npk).await.ok()
                         .and_then(|x| x)
@@ -191,10 +194,6 @@ impl<E> PeerRxEventHandler<E> where E: ExternalNetworkResources + Send + 'static
                     response.multiparty_check_ready_response = Some(true);
                 }
             }
-        }
-
-        if let Some(r) = &request.monero_multisig_formation_request {
-            // relay.
         }
 
         if let Some(_) = &request.get_solana_address {
@@ -388,12 +387,48 @@ impl<E> PeerRxEventHandler<E> where E: ExternalNetworkResources + Send + 'static
             };
             response.batch_transaction_resolve_response = Some(res);
         }
-
+        let self_public = relay.node_config.public_key();
         // Verified requests only below here
         if auth_required {
             match verified {
                 Ok(pk) => {
-
+                    let is_seed = relay.is_seed(&pk);
+                    if is_seed {
+                        if let Some(req) = &request.monero_multisig_formation_request {
+                            let t = req.threshold.safe_get_msg("Threshold not provided")?;
+                            let all_pks = req.public_keys.clone();
+                            let peer_strings = req.peer_strings.clone();
+                            let peer_pks = all_pks
+                                .iter()
+                                .filter(|s| *s != &self_public)
+                                .map(|s| s.clone())
+                                .collect_vec();
+                            let (s, r) =
+                                flume::unbounded::<RgResult<MoneroWalletResponse>>();
+                            let req = MoneroSyncInteraction {
+                                request_start_time: current_time_millis(),
+                                message: MoneroWalletMessage::HandleNextStageRequest,
+                                message_type: MoneroWalletMessageType::Formation,
+                                peer_pks,
+                                all_pks,
+                                threshold: t.value,
+                                peer_strings,
+                                response: s,
+                            };
+                            relay.monero_wallet_messages.send(req).await?;
+                            let res = r.recv_async_err().await??;
+                            match res {
+                                MoneroWalletResponse::PeerCreate(s) => {
+                                    response.monero_multisig_formation_response = Some(s);
+                                }
+                                _ => {
+                                    "bad response".to_error()?;
+                                }
+                            }
+                        } else {
+                            "Unauthorized".to_error()?;
+                        }
+                    }
                 }
                 Err(e) => { return Err(e).add("Unable to process request, authorization required and failed").log_error(); }
             }

@@ -97,17 +97,18 @@ async fn test_multisig_transfer() {
     let mut clis = Vec::new();
     for (i, _) in words.iter().enumerate() {
         let path = home_dir().unwrap().join(format!("test_wallet_2of3_{}", i));
-        let cli = MoneroWalletCli::open_existing_wallet(
+        let mut cli = MoneroWalletCli::open_existing_wallet(
             addr,
             path.to_str().unwrap(),
             None::<String>
         ).await.unwrap();
+        cli.wait_sync().await.unwrap();
         clis.push(cli);
     }
-
-    for cli in clis.iter_mut() {
-        cli.wait_sync().await.unwrap();
-    }
+    //
+    // for cli in clis.iter_mut() {
+    //     cli.wait_sync().await.unwrap();
+    // }
 
     // First, synchronize multisig info between all participants
     println!("Synchronizing multisig info between participants...");

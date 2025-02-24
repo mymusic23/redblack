@@ -555,7 +555,7 @@ impl Relay {
         // Err(error_info("test"))
     }
 
-    pub async fn is_seed(&self, pk: &PublicKey) -> bool {
+    pub fn is_seed(&self, pk: &PublicKey) -> bool {
         self.node_config.seeds_now().iter()
             .filter(|s| s.public_key.as_ref().filter(|&p| p == pk).is_some())
             .next().is_some()
@@ -1313,6 +1313,8 @@ impl<T> SafeLock<T> for tokio::sync::Mutex<T> where T: ?Sized + std::marker::Sen
 // https://doc.rust-lang.org/book/ch15-04-rc.html
 
 
+
+// TODO: impl this also for the channel directly.
 #[async_trait]
 impl PeerBroadcast for Relay {
     async fn broadcast(&self, nodes: &Vec<PublicKey>, request: Request) -> RgResult<Vec<RgResult<Response>>> {

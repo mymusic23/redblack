@@ -27,6 +27,9 @@ use redgold_common_no_wasm::stream_handlers::{run_interval_fold, run_interval_fo
 use redgold_schema::error_info;
 use std::time::Duration;
 use redgold_crawler_native::coinbase_ws::run_decoded_coinbase_ws;
+use redgold_keys::word_pass_support::WordsPassNodeConfig;
+use redgold_node_core::services::monero::MoneroWalletSyncWriter;
+use redgold_schema::structs::SupportedCurrency;
 
 impl Node {
     /**
@@ -191,6 +194,19 @@ impl Node {
 
         if node_config.network.is_main_stage_network() {
             sjh.add("EthDaq", relay.eth_daq.start(&relay.node_config).await);
+        }
+
+        if let Some(daemon_addr) = relay.node_config.rpc_url(SupportedCurrency::Monero).iter().next() {
+            sjh.add("MoneroWalletCli", run_recv_single(
+                    MoneroWalletSyncWriter::new_from_config(
+                        relay.clone(),
+                        relay.node_config.env_data_folder().monero_cli_wallet_dir(),
+                        daemon_addr.url.clone(),
+                        relay.node_config.words(),
+                        relay.ds.clone()
+                    ).await.unwrap(),
+                    relay.monero_wallet_messages.receiver.clone()
+            ).await);
         }
 
         sjh.handles

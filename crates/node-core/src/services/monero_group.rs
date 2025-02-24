@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 use redgold_common::external_resources::PeerBroadcast;
 use redgold_common::flume_send_help::SendErrorInfo;
+use redgold_data::data_store::DataStore;
 use redgold_keys::monero::wallet_cli::monero_wallet_cli::{get_daemon_height_retry, MoneroWalletCli};
 use redgold_schema::keys::words_pass::WordsPass;
 use redgold_schema::observability::errors::Loggable;
 use redgold_schema::{ErrorInfoContext, RgResult, SafeOption};
 use redgold_schema::errors::into_error::ToErrorInfo;
+use redgold_schema::helpers::easy_json::EasyJson;
 use redgold_schema::util::times::current_time_millis;
 use crate::services::monero::{MoneroInstanceSecretData, MoneroSyncInteraction, MoneroTransactionInfo, MoneroWalletMessage, MoneroWalletMessageType, MoneroWalletResponse, MultisigStage};
 use crate::services::monero::MoneroWalletResponse::PeerCreate;
@@ -26,7 +28,8 @@ pub struct WalletThread<B> where B: PeerBroadcast + 'static {
     pub daemon_address: String,
     pub peer_broadcast: B,
     pub live_wallet: RgResult<LiveWallet>,
-    pub is_restore: bool
+    pub is_restore: bool,
+    pub data_store: DataStore,
 }
 
 
@@ -156,7 +159,11 @@ impl<B> WalletThread<B> where B: PeerBroadcast + 'static {
         let response = if self.live_wallet.is_err() || !self.is_restore {
             match message.message {
                 MoneroWalletMessage::InternalCreateMultisigAsProposer => {
-                    self.create_multisig(&message).await
+                    let ret = self.create_multisig(&message).await;
+                    if let Ok(MoneroWalletResponse::InstanceCreated(d)) = &ret {
+                        self.persist(d.clone()).await.ok();
+                    }
+                    ret
                 }
                 MoneroWalletMessage::HandleNextStageRequest => {
                     self.peer_initial_formation_handler(&message).await
@@ -171,6 +178,9 @@ impl<B> WalletThread<B> where B: PeerBroadcast + 'static {
                 }
                 MoneroWalletMessage::HandleNextStageRequest => {
                     let ret = live_wallet.peer_handle_next_stage_request_active(&message).await;
+                    if &live_wallet.stage == &MultisigStage::Ready {
+                        self.persist(live_wallet.data.clone()).await.ok();
+                    }
                     self.live_wallet = Ok(live_wallet);
                     ret
                 }
@@ -203,21 +213,17 @@ impl<B> WalletThread<B> where B: PeerBroadcast + 'static {
         }
     }
 
+    async fn persist(&self, data: MoneroInstanceSecretData) -> RgResult<()> {
+        self.data_store.config_store.set_json(
+            &data.key(),
+            data.json_or()
+        ).await.map(|_| ())
+    }
 }
 
 
 impl LiveWallet {
-    pub async fn get_transactions(&self) -> RgResult<MoneroWalletResponse> {
-        Ok(MoneroWalletResponse::Transactions(MoneroTransactionInfo{
-            tx: self.cli.export_transfers().await?,
-            last_updated: current_time_millis(),
-        }))
-    }
 
-    pub fn filter_self(&self, peer_strs: Vec<String>) -> RgResult<Vec<String>> {
-        let pi = self.last_self_peer_info.as_ref().ok_msg("No self peer info")?;
-        Ok(peer_strs.into_iter().filter(|x| x != pi).collect())
-    }
     pub fn new(wallet: MoneroWalletCli, data: MoneroInstanceSecretData) -> Self {
         Self {
             cli: wallet,
@@ -242,6 +248,18 @@ impl LiveWallet {
             data,
         })
     }
+    pub async fn get_transactions(&self) -> RgResult<MoneroWalletResponse> {
+        Ok(MoneroWalletResponse::Transactions(MoneroTransactionInfo{
+            tx: self.cli.export_transfers().await?,
+            last_updated: current_time_millis(),
+        }))
+    }
+
+    pub fn filter_self(&self, peer_strs: Vec<String>) -> RgResult<Vec<String>> {
+        let pi = self.last_self_peer_info.as_ref().ok_msg("No self peer info")?;
+        Ok(peer_strs.into_iter().filter(|x| x != pi).collect())
+    }
+
     pub async fn destroy(&self) {
         self.cli.destroy();
         self.data.wallet_data.destroy().await.ok();

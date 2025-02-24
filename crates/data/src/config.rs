@@ -98,6 +98,26 @@ impl ConfigStore {
         Ok(ret)
     }
 
+    pub async fn select_all_key_names(
+        &self,
+    ) -> RgResult<Vec<String>> {
+        let mut pool = self.ctx.pool().await?;
+
+        let rows = sqlx::query(
+            "SELECT key_name FROM config",
+        ).fetch_all(&mut *pool).await;
+
+        let rows2 = DataStoreContext::map_err_sqlx(rows)?;
+        let mut res = vec![];
+        for row in rows2 {
+            let r: Option<String> = row.try_get("key_name").ok();
+            if let Some(r) = r {
+                res.push(r)
+            }
+        }
+        Ok(res)
+    }
+
     pub async fn select_config_bytes(
         &self,
         key: String

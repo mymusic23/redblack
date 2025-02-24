@@ -36,6 +36,10 @@ impl EnvDataFolder {
         self.path.join("monerow")
     }
 
+    pub fn monero_cli_wallet_dir(&self) -> PathBuf {
+        self.path.join("monero_cli_wallet")
+    }
+
     pub fn monero_wallet_expect(&self) -> PathBuf {
         self.path.join("wallet.exp")
     }

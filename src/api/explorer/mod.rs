@@ -410,7 +410,7 @@ async fn render_pool_member(relay: &Relay, member: &PublicKey, party_len: usize)
         security_rating: 10.0,
         pool_stake_usd: None,
         weighted_overall_stake_rating: None,
-        is_seed: relay.is_seed(member).await,
+        is_seed: relay.is_seed(member),
     })
 }
 

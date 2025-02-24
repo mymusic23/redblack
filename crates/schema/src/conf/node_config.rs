@@ -245,7 +245,7 @@ impl NodeConfig {
             if let Some(r) = external.rpcs.as_ref() {
                 for rr in r.iter() {
                     if let Some(n) = NetworkEnvironment::from_std_string(&rr.network).ok() {
-                        if rr.currency == cur && self.network == n {
+                        if rr.currency == cur && (self.network == n) || self.network == NetworkEnvironment::All {
                             res.push(rr.clone());
                         }
                     }
