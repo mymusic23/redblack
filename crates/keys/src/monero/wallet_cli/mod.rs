@@ -3,5 +3,5 @@ pub mod cli_transfer;
 pub mod cli_create_multisig;
 pub mod cli_ms_transfer;
 pub mod cli_load_multisig;
-mod cli_tx_history;
-mod cli_view_history;
+pub mod cli_tx_history;
+pub mod cli_view_history;

@@ -38,18 +38,31 @@ pub struct MoneroWalletCli where Self: Send + 'static {
     // pub child: Arc<Box<dyn portable_pty::Child + Send>>,
     pub daemon_address: String,
     pub timeout: Duration,
+    pub terminate_threads_r: flume::Receiver<()>,
+    pub terminate_threads_s: flume::Sender<()>
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct WalletDiskFiles{
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct MoneroWalletDiskFiles {
     pub wallet_name: String,
     pub on_disk_path: String,
     pub wallet_bytes: Vec<u8>,
     pub keys_bytes: Vec<u8>,
 }
 
+impl MoneroWalletDiskFiles {
+    pub async fn destroy(&self) -> RgResult<()> {
+        self.on_disk_path.delete_file().await?;
+        format!("{}.keys", self.on_disk_path).delete_file().await
+    }
+}
+
 
 impl MoneroWalletCli {
+
+    pub fn destroy(&self) -> RgResult<()> {
+        self.terminate_threads_s.send_rg_err(())
+    }
 
     /*
     [wallet 46AYBk]: get_tx_proof
@@ -113,7 +126,7 @@ signature file saved to: monero_tx_proof
         let mut cmd = Self::command_base(daemon_address.as_ref(), working_dir)?;
         cmd.arg("--wallet-file");
         cmd.arg(path.as_ref());
-        let mut cli = Self::from_pty(cmd, daemon_address)?;
+        let mut cli = Self::from_pty(cmd, daemon_address, )?;
         cli.password().await?;
         cli.time(10);
         cli.expect_wallet().await?;
@@ -150,8 +163,11 @@ signature file saved to: monero_tx_proof
 
     pub(crate) fn from_pty(
         cmd: CommandBuilder,
-        addr: impl AsRef<str>,
+        addr: impl AsRef<str>
     ) -> RgResult<Self> {
+        let (terminate_threads_s, terminate_threads_r) = flume::unbounded::<()>();
+        let terminator = terminate_threads_r.clone();
+
         let pair = Self::open_pty()?;
         let master = pair.master;
         let _child = pair.slave.spawn_command(cmd)
@@ -164,10 +180,11 @@ signature file saved to: monero_tx_proof
 
         let (reader_s, reader_r) = flume::unbounded::<String>();
         let (writer_s, writer_r) = flume::unbounded::<String>();
+        let terminator1 = terminator.clone();
         let jh_reader = std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = vec![0; 65536];
-            // println!("Reading");
+            let terminator = terminator1;
             loop {
                 match reader.read(&mut buf).error_info("Read failure") {
                     Ok(r) => {
@@ -185,20 +202,30 @@ signature file saved to: monero_tx_proof
                         break;
                     }
                 }
+                if let Ok(_) = terminator.try_recv() {
+                    break;
+                }
                 std::thread::sleep(Duration::from_millis(100));
             }
         });
 
         let w2 = writer_r.clone();
+        let terminator2 = terminator.clone();
         let jh_writer = std::thread::spawn(move || {
             let mut writer = writer;
             let writer_r = w2;
+            let terminator = terminator2;
             loop {
                 let next = writer_r.try_recv();
                 if let Ok(next) = next {
                     println!("Writing {}", next.clone());
                     writer.write_all(next.as_bytes()).unwrap();
                 }
+                if let Ok(_) = terminator.try_recv() {
+                    writer.write_all(b"exit\n").unwrap();
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
             }
         });
 
@@ -211,16 +238,18 @@ signature file saved to: monero_tx_proof
                 // child: Arc::new(child),
                 daemon_address: addr.as_ref().to_string(),
                 timeout: Duration::from_secs(2),
+                terminate_threads_r,
+                terminate_threads_s,
             }
         )
     }
 
-    pub async fn get_wallet_files(wallet_name: impl Into<String>, full_path: impl Into<String>) -> RgResult<WalletDiskFiles> {
+    pub async fn get_wallet_files(wallet_name: impl Into<String>, full_path: impl Into<String>) -> RgResult<MoneroWalletDiskFiles> {
         let name = wallet_name.into();
         let path = full_path.into();
         let pb = PathBuf::from(&path);
         let pb_keys = pb.with_extension("keys");
-        Ok(WalletDiskFiles {
+        Ok(MoneroWalletDiskFiles {
             wallet_name: name.clone(),
             on_disk_path: path.clone(),
             wallet_bytes: path.read_bytes().await?,
@@ -278,6 +307,7 @@ signature file saved to: monero_tx_proof
         restore_height: Option<i64>,
         daemon_address: impl Into<String>,
         allow_delete_old: bool,
+        working_dir: Option<impl AsRef<Path>>,
     ) -> RgResult<Self> {
         let addr = daemon_address.into();
 
@@ -293,7 +323,7 @@ signature file saved to: monero_tx_proof
             None => get_daemon_height(addr.clone()).await? - 20,
         };
 
-        let mut cmd = Self::command_base(&addr, None::<String>)?;
+        let mut cmd = Self::command_base(&addr, working_dir)?;
 
         cmd.arg("--restore-height");
         cmd.arg(height.to_string());
@@ -305,44 +335,50 @@ signature file saved to: monero_tx_proof
     }
 
 
-    pub async fn restore_from_spend_full(
+    pub async fn restore_from_spend_and_enter_info(
         words: WordsPass,
         wallet_path: impl Into<String>,
         restore_height: Option<i64>,
         daemon_address: impl Into<String>,
         allow_delete_old: bool,
     ) -> RgResult<Self> {
+        let mut cli =
+            Self::restore_from_spend_precursor(
+                wallet_path, restore_height, daemon_address, allow_delete_old, None::<String>
+            ).await?;
+        cli.restore_from_spend_enter_info(words).await
+    }
 
+    pub async fn restore_from_spend_enter_info(mut self, words: WordsPass) -> RgResult<Self> {
         let kp = words.derive_monero_keys()?;
         let sp = kp.spend.to_string();
         let sv = kp.view.to_string();
         let address = words.monero_external_address(&NetworkEnvironment::Main)?;
         let addr_str = address.render_string()?;
 
-        let mut cli = Self::restore_from_spend_precursor(wallet_path, restore_height, daemon_address, allow_delete_old).await?;
-        cli.try_read_expect("Standard address:").await?;
-        cli.write(addr_str).await?;
-        cli.try_read_expect("Secret spend key:").await?;
-        cli.write(sp).await?;
-        cli.try_read_expect("Secret view key:").await?;
-        cli.write(sv).await?;
-        cli.try_read_expect("Enter a new password for the wallet:").await?;
-        cli.write("").await?;
-        cli.try_read_expect("Confirm password:").await?;
-        cli.write("").await?;
-        cli.time(10);
+        self.try_read_expect("Standard address:").await?;
+        self.write(addr_str).await?;
+        self.try_read_expect("Secret spend key:").await?;
+        self.write(sp).await?;
+        self.try_read_expect("Secret view key:").await?;
+        self.write(sv).await?;
+        self.try_read_expect("Enter a new password for the wallet:").await?;
+        self.write("").await?;
+        self.try_read_expect("Confirm password:").await?;
+        self.write("").await?;
+        self.time(10);
         // Tried this but it blows up, possibly due to some console refresh?
-        // cli.try_read_expect("or alternatively from specific date (YYYY-MM-DD):").await?;
+        // self.try_read_expect("or alternatively from specific date (YYYY-MM-DD):").await?;
         // if untrusted use this.
-        // cli.try_read_expect("Generated new wallet:").await?;
+        // self.try_read_expect("Generated new wallet:").await?;
         // tokio::time::sleep(Duration::from_secs(3)).await;
-        let out = cli.try_read().await?;
+        let out = self.try_read().await?;
         if out.contains("Do you want to do it now?") {
-            cli.write("No").await?;
+            self.write("No").await?;
         } else if out.contains("Still apply restore height?") {
-            cli.write("Yes").await?;
-            cli.try_read_expect("Do you want to do it now?").await?;
-            cli.write("No").await?;
+            self.write("Yes").await?;
+            self.try_read_expect("Do you want to do it now?").await?;
+            self.write("No").await?;
         } else {
             "Unknown prompt".to_error()
                 .with_detail("output", out)?;
@@ -351,21 +387,20 @@ signature file saved to: monero_tx_proof
         //
         // tokio::time::sleep(Duration::from_secs(2)).await;
         tokio::time::sleep(Duration::from_secs(2)).await;
-        cli.time(2);
-        cli.expect_wallet().await?;
+        self.time(2);
+        self.expect_wallet().await?;
         tokio::time::sleep(Duration::from_secs(1)).await;
-        cli.write("set ask-password 0").await?;
-        cli.try_read_expect("Wallet password:").await?;
-        cli.write("").await?;
-        cli.expect_wallet().await?;
-        cli.write("set inactivity-lock-timeout 0").await?;
-        cli.try_read_expect("Wallet password:").await?;
-        cli.write("").await?;
-        cli.expect_wallet().await?;
+        self.write("set ask-password 0").await?;
+        self.try_read_expect("Wallet password:").await?;
+        self.write("").await?;
+        self.expect_wallet().await?;
+        self.write("set inactivity-lock-timeout 0").await?;
+        self.try_read_expect("Wallet password:").await?;
+        self.write("").await?;
+        self.expect_wallet().await?;
         tokio::time::sleep(Duration::from_secs(1)).await;
-        Ok(cli)
+        Ok(self)
     }
-
 
     pub fn command_base(addr: impl AsRef<str>, working_dir: Option<impl AsRef<Path>>) -> RgResult<CommandBuilder> {
         // Get current working directory and set it for the child process

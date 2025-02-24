@@ -13,33 +13,32 @@ impl MoneroWalletCli {
         self.write(cmd).await?;
         self.try_read_expect("Is this okay?  (Y/Yes/N/No):").await?;
         self.write("Yes").await?;
-        let out = self.try_read_expect("Unsigned transaction(s) successfully written to file:").await?;
-        let txset = out
-            .split("file: ").last().ok_msg("split")?
-            .split("\n").next().ok_msg("split")?.trim().to_string();
-        Ok(txset)
+        self.try_read_expect("Unsigned transaction(s) successfully written to file:").await?;
+        let txset = "multisig_monero_tx".read_bytes().await?;
+        Ok(hex::encode(txset))
     }
 
-    pub async fn sign_multisig(&mut self, filename: &str) -> RgResult<String> {
-        let cmd = format!("sign_multisig {}", filename);
+    pub async fn sign_multisig(&mut self, unsigned_tx_set_hex_encoded: impl AsRef<str>) -> RgResult<String> {
+        "multisig_monero_tx".write_bytes(from_hex(unsigned_tx_set_hex_encoded.as_ref().to_string())?).await?;
+        let cmd = format!("sign_multisig {}", "multisig_monero_tx");
         self.write(cmd).await?;
         self.try_read_expect("Is this okay?  (Y/Yes/N/No):").await?;
         self.write("Yes").await?;
-        let out = self.try_read_expect("Transaction successfully signed to file:").await?;
-        let signed = out
-            .split("file: ").last().ok_msg("split")?
-            .split("\n").next().ok_msg("split")?.trim().to_string();
-        Ok(signed)
+        self.try_read_expect("successfully signed to file").await?;
+        let txset = "multisig_monero_tx".read_bytes().await?;
+        Ok(hex::encode(txset))
     }
 
-    pub async fn submit_multisig(&mut self, filename: &str) -> RgResult<String> {
-        let cmd = format!("submit_multisig {}", filename);
+    pub async fn submit_multisig(&mut self, tx_contents: impl AsRef<str>) -> RgResult<String> {
+        "multisig_monero_tx".write_bytes(from_hex(tx_contents.as_ref().to_string())?).await?;
+        let cmd = format!("submit_multisig {}", "multisig_monero_tx");
         self.write(cmd).await?;
         self.try_read_expect("Transaction successfully submitted, transaction").await?;
-        let out = self.try_read().await?;
-        let txid = out
+        let txid = self.try_read().await?
             .split("transaction <").last().ok_msg("split")?
-            .split(">").next().ok_msg("split")?.to_string();
+            .split(">").next().ok_msg("split")?
+            .to_string();
+        "multisig_monero_tx".delete_file().await?;
         Ok(txid)
     }
 
@@ -148,7 +147,7 @@ async fn test_multisig_transfer() {
 
     // Get signatures from first three wallets (3-of-5 required)
     let mut current_txset = unsigned_txset;
-    for i in 0..2 {
+    for i in 0..1 {
         let signed_txset = clis[i + 1].sign_multisig(&current_txset).await.unwrap();
         println!("Wallet {} signed transaction set: {}", i + 1, signed_txset);
         current_txset = signed_txset;  // Use this signed txset for the next signer

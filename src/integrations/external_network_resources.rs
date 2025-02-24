@@ -44,7 +44,7 @@ use redgold_keys::monero::node_wrapper::MoneroNodeRpcInterfaceWrapper;
 use redgold_keys::solana::derive_solana::SolanaWordPassExt;
 use redgold_keys::solana::wallet::SolanaNetwork;
 use redgold_keys::util::mnemonic_support::MnemonicSupport;
-use redgold_node_core::services::monero_wallet_messages::{MoneroSyncInteraction, MoneroWalletMessage, MoneroWalletResponse};
+use redgold_node_core::services::monero::{MoneroSyncInteraction, MoneroWalletMessage, MoneroWalletMessageType, MoneroWalletResponse};
 use redgold_rpc_integ::examples::example::dev_ci_kp;
 use redgold_schema::hash::ToHashed;
 use redgold_schema::keys::words_pass::WordsPass;
@@ -594,23 +594,22 @@ async fn get_all_tx_for_pk(&self, pk: &PublicKey, currency: SupportedCurrency, f
                     flume::bounded::<RgResult<MoneroWalletResponse>>(1);
                 self.relay.safe_get_msg("Missing relay")?.monero_wallet_messages
                     .sender.send_rg_err(MoneroSyncInteraction{
-                    message: MoneroWalletMessage::MultisigCreateNext,
-                    wallet_id: MoneroNodeRpcInterfaceWrapper::<LocalSSHLike>::get_wallet_filename_id(
-                        all_pks, threshold
-                    ),
+                    request_start_time: util::current_time_millis_i64(),
+                    message: MoneroWalletMessage::InternalCreateMultisigAsProposer,
+                    message_type: MoneroWalletMessageType::Formation,
                     all_pks: all_pks.clone(),
                     peer_strings: vec![],
                     threshold,
                     response: s,
-                    operation_initialization: true,
+                    peer_pks: peer_pks.clone(),
                 })?;
                 let result = r.recv_async_err_timeout(Duration::from_secs(120)).await??;
                 let mw = match result {
-                    MoneroWalletResponse::PeerCreate(_) => { None}
-                    MoneroWalletResponse::InstanceCreate(i) => {
+                    MoneroWalletResponse::InstanceCreated(i) => {
                         secret_json = Some(i.json_or());
-                        Some(i.address)
+                        Some(Address::from_monero_external(&i.raw_monero_output_address))
                     }
+                    _ => { None}
                 };
                 mw
             }

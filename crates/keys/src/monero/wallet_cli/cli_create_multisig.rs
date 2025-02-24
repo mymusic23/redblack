@@ -2,6 +2,7 @@ use std::env::home_dir;
 use itertools::Itertools;
 use redgold_schema::keys::words_pass::WordsPass;
 use redgold_schema::{RgResult, SafeOption};
+use redgold_schema::structs::ErrorInfo;
 use crate::monero::wallet_cli::monero_wallet_cli::{get_daemon_height_retry, MoneroWalletCli};
 use crate::TestConstants;
 use crate::util::mnemonic_support::MnemonicSupport;
@@ -15,23 +16,33 @@ impl MoneroWalletCli {
         daemon_address: impl Into<String>,
         allow_delete_old: bool,
     ) -> RgResult<(Self, String)> {
+        let mut cli = Self::restore_from_spend_and_enter_info(words, wallet_path, restore_height, daemon_address, allow_delete_old).await?;
+        cli.restore_from_spend_multisig_prepare_step_only().await
+    }
 
-        let mut cli = Self::restore_from_spend_full(words, wallet_path, restore_height, daemon_address, allow_delete_old).await?;
+    pub async fn restore_from_spend_up_to_prepare(mut self, words: WordsPass) -> RgResult<(Self, String)> {
+        self
+            .restore_from_spend_enter_info(words).await?
+            .restore_from_spend_multisig_prepare_step_only().await
+    }
 
-        cli.write("set enable-multisig-experimental 1").await?;
-        cli.try_read_expect("Wallet password:").await?;
-        cli.write("").await?;
-        cli.expect_wallet().await?;
+    pub async fn restore_from_spend_multisig_prepare_step_only(
+        mut self
+    ) -> RgResult<(MoneroWalletCli, String)> {
+        self.write("set enable-multisig-experimental 1").await?;
+        self.try_read_expect("Wallet password:").await?;
+        self.write("").await?;
+        self.expect_wallet().await?;
 
 
-        cli.write("set").await?;
-        cli.time(10);
-        cli.try_read_expect("enable-multisig-experimental = 1").await?;
-        cli.time(2);
-        // cli.wait_sync().await?;
-        cli.time(6);
-        cli.write("prepare_multisig").await?;
-        let out = cli.try_read_expect(
+        self.write("set").await?;
+        self.time(10);
+        self.try_read_expect("enable-multisig-experimental = 1").await?;
+        self.time(2);
+        // self.wait_sync().await?;
+        self.time(6);
+        self.write("prepare_multisig").await?;
+        let out = self.try_read_expect(
             "This includes the PRIVATE view key, so needs to be disclosed only to that multisig wallet's participants")
             .await?;
 
@@ -42,10 +53,10 @@ impl MoneroWalletCli {
         Send this multisig info to all other participants, then use make_multisig <threshold> <info1> [<info2>...] with others' multisig info
         This includes the PRIVATE view key, so needs to be disclosed only to that multisig wallet's participants
          */
-        cli.time(2);
+        self.time(2);
         let multisig_prepared = Self::split_extract_multisig(out)?;
-        // Self::wait_sync(&mut cli).await?;
-        Ok((cli, multisig_prepared))
+        // Self::wait_sync(&mut self).await?;
+        Ok((self, multisig_prepared))
     }
 
     pub async fn make_multisig(&mut self, threshold: i64, peer_strings: Vec<String>) -> RgResult<String> {

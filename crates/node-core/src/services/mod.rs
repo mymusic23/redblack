@@ -1,4 +1,2 @@
-pub mod monero_wallet_messages;
-
-
 pub mod monero;
+pub mod monero_group;

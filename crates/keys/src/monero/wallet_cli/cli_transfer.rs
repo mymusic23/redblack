@@ -154,7 +154,7 @@ async fn test_single_transfer() {
 }
 
 async fn restore_ci_wallet(ci1: WordsPass, height: i64, wp: PathBuf) {
-    let mut cli = MoneroWalletCli::restore_from_spend_full(
+    let mut cli = MoneroWalletCli::restore_from_spend_and_enter_info(
         ci1, wp.to_str().unwrap().to_string(), Some(height), "http://server:18089", false
     ).await.unwrap();
 

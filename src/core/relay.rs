@@ -494,7 +494,7 @@ use redgold_crawler::coinbase::ticker_schema::TickerMessage;
 use redgold_crawler_native::coinbase_ws::CoinbaseWsTicker;
 use redgold_daq::eth::EthDaq;
 use redgold_keys::address_external::ToEthereumAddress;
-use redgold_node_core::services::monero_wallet_messages::{MoneroSyncInteraction, MoneroWalletMessage};
+use redgold_node_core::services::monero::MoneroSyncInteraction;
 use redgold_rpc_integ::eth::eth_wallet::EthWalletWrapper;
 use redgold_schema::parties::PartyMetadata;
 use redgold_schema::party::address_event::AddressEvent;
@@ -1056,7 +1056,7 @@ impl Relay {
                 continue;
             }
             let req = request.clone();
-            let timeout = Some(timeout.unwrap_or(Duration::from_secs(60)));
+            let timeout = Some(timeout.unwrap_or(Duration::from_secs(90)));
             let res = self.send_message_async(&req, &p, timeout).await?;
             results.push((p, res));
         }
